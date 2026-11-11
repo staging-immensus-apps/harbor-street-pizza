@@ -1,296 +1,58 @@
 {
   "appName": "Pizza Shop Online Ordering",
-  "summary": "A website where customers browse your pizza menu, order for pickup or delivery, and pay online, while you update the menu and prices and watch new orders come in.",
-  "appKindRecommendation": {
-    "appKind": "web_app",
-    "why": "Customers browse your menu and order pizza on pages they visit, while you manage prices and orders on the same site."
-  },
-  "lookRecommendation": {
-    "look": "bloom",
-    "why": "A pizza shop is a cheerful, everyday treat, and a bright, friendly look suits food photos and a quick order flow."
-  },
+  "summary": "I'll show pizzas before drinks on the menu and add a short line under the shop name saying you deliver within three miles.",
+  "editClass": "ui_only",
   "personas": [
     {
       "id": "customer",
       "label": "Customer",
-      "description": "Someone ordering pizza for pickup or delivery."
+      "description": "Browses the menu and orders pizza as a guest."
     },
     {
       "id": "owner",
-      "label": "Store owner",
-      "description": "You, running the pizza store and managing the menu and orders."
+      "label": "Shop owner",
+      "description": "Signs in to manage the menu, orders and settings."
     }
   ],
   "stories": [
     {
-      "id": "browse-menu",
+      "id": "pizzas-before-drinks",
       "actor": "customer",
-      "goal": "see the pizza menu with descriptions and prices",
+      "goal": "see the pizza section before the drinks section when browsing the menu",
       "acceptance": [
-        "Customer opens the site and sees all current menu items with names, descriptions and prices."
+        "On the home page menu, every pizza item appears above every drink item, regardless of alphabetical order of the category names",
+        "Any other category on the menu keeps its current position relative to the other categories"
       ],
-      "severity": "blocker"
+      "severity": "minor",
+      "area": "frontend"
     },
     {
-      "id": "choose-pickup-or-delivery",
+      "id": "delivery-radius-line",
       "actor": "customer",
-      "goal": "choose pickup or delivery and give the details needed for it",
+      "goal": "see a short note under the shop name saying delivery is available within three miles",
       "acceptance": [
-        "Customer picks pickup or delivery before checkout.",
-        "Delivery orders ask for a delivery address; pickup orders do not."
+        "A line reading 'We deliver within 3 miles' appears directly under the shop name wherever the shop name is shown to customers"
       ],
-      "severity": "blocker"
-    },
-    {
-      "id": "pay-online",
-      "actor": "customer",
-      "goal": "pay for the order online to complete checkout",
-      "acceptance": [
-        "Customer enters payment details and the order is only placed once payment succeeds."
-      ],
-      "severity": "blocker"
-    },
-    {
-      "id": "order-confirmation",
-      "actor": "customer",
-      "goal": "see confirmation that the order was placed",
-      "acceptance": [
-        "After paying, customer sees a confirmation screen with the order summary and estimated ready time."
-      ],
-      "severity": "major"
-    },
-    {
-      "id": "view-new-orders",
-      "actor": "owner",
-      "goal": "see new orders as customers place them",
-      "acceptance": [
-        "Owner's order screen shows a new order appearing without reloading the page, with items, pickup/delivery choice and payment status."
-      ],
-      "severity": "blocker"
-    },
-    {
-      "id": "update-menu",
-      "actor": "owner",
-      "goal": "add, edit or remove menu items and change prices",
-      "acceptance": [
-        "Owner edits a menu item's name, description or price and the change is visible to customers immediately."
-      ],
-      "severity": "blocker"
-    },
-    {
-      "id": "update-order-status",
-      "actor": "owner",
-      "goal": "mark an order's status as it moves through preparation",
-      "acceptance": [
-        "Owner changes an order from received to preparing to ready, and the change is saved."
-      ],
-      "severity": "major"
+      "severity": "minor",
+      "area": "frontend"
     }
   ],
-  "entities": [
-    {
-      "name": "MenuItem",
-      "description": "A pizza or other menu item: name, description, price, category, and any size/topping options."
-    },
-    {
-      "name": "Order",
-      "description": "A customer's order: items, pickup or delivery choice, delivery address if any, status, payment result."
-    },
-    {
-      "name": "Customer",
-      "description": "Name, phone and contact details for an order; an account only if the founder chooses that option."
-    },
-    {
-      "name": "StoreSettings",
-      "description": "Store-level details such as delivery area and whether scheduled orders are allowed."
-    }
-  ],
+  "entities": [],
   "outOfScope": [
-    "Loyalty or rewards programs",
-    "Text message order updates",
-    "Multiple store locations",
-    "Delivery driver dispatch or live tracking",
-    "Ingredient-level inventory management"
+    "Changing the postcode list or how delivery area is enforced at checkout",
+    "Changing menu item data, prices or categories themselves"
   ],
-  "questions": [
-    {
-      "id": "app_kind",
-      "kind": "app_kind",
-      "subject": "app_kind",
-      "awaitAnswer": true,
-      "prompt": "First, what sort of thing are we building? I think it is \"something people open and use\" — Customers browse your menu and order pizza on pages they visit, while you manage prices and orders on the same site. Tell me if that is not right; it changes everything that comes after.",
-      "options": [
-        {
-          "id": "web_app",
-          "label": "Something people open and use",
-          "detail": "Pages people visit on a phone or a computer."
-        },
-        {
-          "id": "service",
-          "label": "Something other software talks to",
-          "detail": "An interface for other programs, with no screens of its own."
-        },
-        {
-          "id": "agent",
-          "label": "Something that works on its own",
-          "detail": "It runs on a schedule or reacts to events, and decides as it goes."
-        },
-        {
-          "id": "pipeline",
-          "label": "Something that moves and reshapes data",
-          "detail": "It takes data in, changes it, and passes it on."
-        },
-        {
-          "id": "something_else",
-          "label": "Something else"
-        }
-      ],
-      "blocking": false
-    },
-    {
-      "id": "menu_customization",
-      "kind": "menu",
-      "subject": "other",
-      "prompt": "Should customers be able to customize pizzas (pick size, crust, toppings), or do you just want a fixed list of ready-made items with set prices?",
-      "options": [
-        {
-          "id": "fixed",
-          "label": "Fixed menu items only"
-        },
-        {
-          "id": "customizable",
-          "label": "Let customers customize size and toppings"
-        },
-        {
-          "id": "something_else",
-          "label": "Something else"
-        }
-      ],
-      "blocking": false
-    },
-    {
-      "id": "delivery_area",
-      "kind": "delivery",
-      "subject": "other",
-      "prompt": "Should delivery be limited to a certain area, or can anyone enter a delivery address?",
-      "options": [
-        {
-          "id": "limited",
-          "label": "Limit delivery to an area I set"
-        },
-        {
-          "id": "open",
-          "label": "Accept delivery orders from any address"
-        },
-        {
-          "id": "something_else",
-          "label": "Something else"
-        }
-      ],
-      "blocking": false
-    },
-    {
-      "id": "staff_access",
-      "kind": "staff",
-      "subject": "other",
-      "prompt": "Will anyone besides you need their own login to see and manage incoming orders, like kitchen staff?",
-      "options": [
-        {
-          "id": "just_me",
-          "label": "Just me"
-        },
-        {
-          "id": "staff",
-          "label": "Me and staff"
-        },
-        {
-          "id": "something_else",
-          "label": "Something else"
-        }
-      ],
-      "blocking": false
-    },
-    {
-      "id": "order_timing",
-      "kind": "ordering",
-      "subject": "other",
-      "prompt": "Can customers schedule a pickup or delivery for later, or should every order be for as soon as possible?",
-      "options": [
-        {
-          "id": "asap",
-          "label": "As soon as possible only"
-        },
-        {
-          "id": "scheduled",
-          "label": "Let customers pick a time"
-        },
-        {
-          "id": "something_else",
-          "label": "Something else"
-        }
-      ],
-      "blocking": false
-    },
-    {
-      "id": "guest_checkout",
-      "kind": "checkout",
-      "subject": "other",
-      "prompt": "Do customers need to create an account to order, or can they check out as a guest each time?",
-      "options": [
-        {
-          "id": "guest",
-          "label": "Guest checkout, no account needed"
-        },
-        {
-          "id": "account",
-          "label": "Customers create an account"
-        },
-        {
-          "id": "something_else",
-          "label": "Something else"
-        }
-      ],
-      "blocking": false
-    },
-    {
-      "id": "payments",
-      "kind": "payments",
-      "subject": "payments",
-      "prompt": "Taking payments needs your Stripe account. I'll build invite codes now and add checkout when you connect Stripe. Is that right?",
-      "options": [
-        {
-          "id": "invite_codes",
-          "label": "Yes, invite codes for now"
-        },
-        {
-          "id": "wait",
-          "label": "Wait until I connect Stripe"
-        },
-        {
-          "id": "something_else",
-          "label": "Something else"
-        }
-      ],
-      "safeOption": "wait",
-      "blocking": true
-    }
-  ],
+  "questions": [],
   "assumptions": [
-    "Online payment will go through your own Stripe account, which you'll connect once the app is built.",
-    "This is for a single store location.",
-    "No files were attached to this request."
+    "The shop name is shown in the site header on every customer-facing page (the frame around the pages); the delivery line is added directly below it there, not only on the home page.",
+    "The exact wording used is 'We deliver within 3 miles'.",
+    "The menu currently lists categories alphabetically. I'll keep each category's items in their existing order, but move the category containing pizzas to the top and the category containing drinks to the bottom; any other categories keep their current relative order in between.",
+    "This is a display change only: no menu item, price or category data is changed, and no new settings are added for the owner to edit the delivery line or category order later."
   ],
-  "riskFlags": [
-    "payments"
-  ],
-  "riskSubjects": [
-    {
-      "flag": "payments",
-      "about": "paying online for pizza orders"
-    }
-  ],
-  "editClass": null,
-  "sessionId": "d7819111-ec06-4131-9a25-de18af126503",
-  "costUsd": 0.17620059999999999,
+  "riskFlags": [],
+  "riskSubjects": [],
+  "injectionNoted": [],
+  "sessionId": "d2ef2ddf-6827-46bf-9518-36ffafa44ec1",
+  "costUsd": 0.14312529999999998,
   "overran": null
 }
