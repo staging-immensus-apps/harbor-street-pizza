@@ -1,0 +1,9 @@
+GET / 200
+GET /build 200
+GET /AuthApi/me 200
+GET /MenuApi 200
+GET /StoreInfoApi 200
+GET /order 200
+GET /MenuAdminApi/ 403
+GET /OrderAdminApi/ 403
+GET /StoreSettingsApi/ 403
