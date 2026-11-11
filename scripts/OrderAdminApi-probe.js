@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 // GENERATED — OrderAdminApi over resources/OrderAdminApi.js, the shop's owner-only live queue and
 // the only resource that ever serves a customer's name, phone number or delivery address
-// (CLAUDE.md §9). Proves every entry point — GET list, GET one, PUT/PATCH and the live stream's
-// connect() — refuses anonymous, a signed-in non-admin and a demoted admin with 403 and no
-// WWW-Authenticate, that none of those refusals leak a customer's details, that connect() never
-// reaches subscribe() without passing requireAdmin first, that the default list is the active
-// queue and a junk ?queue= falls back to it, and that a status update keeps the queue in lockstep
-// with the status while the body cannot smuggle a change to any other field. PUT is the verb the
-// front end calls (Harper's REST layer answered PATCH with a 400 before the resource ran, measured
-// on a real cluster 2026-11-11), so every assertion below is driven over BOTH PUT and PATCH.
+// (CLAUDE.md §9). Proves every entry point — GET list, GET one, POST status, PUT/PATCH aliases
+// and the live stream's connect() — refuses anonymous, a signed-in non-admin and a demoted admin
+// with 403 and no WWW-Authenticate, that none of those refusals leak a customer's details, that
+// connect() never reaches subscribe() without passing requireAdmin first, that the default list is
+// the active queue and a junk ?queue= falls back to it, and that a status update keeps the queue in
+// lockstep with the status while the body cannot smuggle a change to any other field.
+// `POST /OrderAdminApi/status` with the id in the BODY is the route the front end actually calls —
+// Harper's REST layer refuses a write aimed at a RECORD path (`/OrderAdminApi/:id`) on a custom
+// Resource with a 400 before the resource ever runs, for every verb, measured on a real cluster
+// 2026-11-11 — so POST status gets its own full negative-control pass, and PUT/PATCH on the record
+// path are kept covered as aliases.
 //
 // Hermetic: clock frozen, no network, no git.
 
@@ -98,6 +101,10 @@ for (const [label, cookie, expectCode] of [['anonymous', null, 'auth_required'],
     const upd = await call(OrderAdminApi, verb, A1, { cookie, body: { status: 'preparing' } })
     check(`${label}: ${verb} → 403 ${expectCode}, and the row is untouched`, upd.status === 403 && upd.json?.code === expectCode && tables.Order.rows.get(A1).status === before.status)
   }
+
+  const beforePost = { ...tables.Order.rows.get(A1) }
+  const postUpd = await call(OrderAdminApi, 'POST', 'status', { cookie, body: { id: A1, status: 'preparing' } })
+  check(`${label}: POST status → 403 ${expectCode}, and the row is untouched`, postUpd.status === 403 && postUpd.json?.code === expectCode && tables.Order.rows.get(A1).status === beforePost.status)
 }
 
 section('connect(): the live stream is admin-only and never reaches subscribe without passing it')
@@ -225,6 +232,63 @@ for (const verb of ['PUT', 'PATCH']) {
   }
 }
 
+section('POST /OrderAdminApi/status — the route the front end actually calls, id in the body')
+{
+  const pA1 = 'order-post-a1'
+  const pD1 = 'order-post-d1'
+  const pP1 = 'order-post-p1'
+  await tables.Order.put(makeOrder({ id: pA1, placedAt: '2026-03-01T00:00:00.000Z', status: 'received', queue: 'active', customerName: 'Ada Lovelace', customerPhone: '555-0100' }))
+  await tables.Order.put(makeOrder({ id: pD1, placedAt: '2026-03-02T00:00:00.000Z', status: 'collected', queue: 'done', customerName: 'Done Person', customerPhone: '555-0300' }))
+  await tables.Order.put(makeOrder({ id: pP1, placedAt: '2026-03-03T00:00:00.000Z', status: 'awaiting_payment', queue: 'pending_payment', customerName: 'Pending Person', customerPhone: '555-0400', paymentStatus: 'unpaid' }))
+
+  // received → preparing → ready → collected: each step both status and queue move, read from
+  // the stored row rather than trusted from the response.
+  const toPreparing = await call(OrderAdminApi, 'POST', 'status', { cookie: ADMIN.cookie, body: { id: pA1, status: 'preparing' } })
+  check('received → preparing → 200, queue stays active', toPreparing.status === 200 && toPreparing.json?.order?.status === 'preparing' && toPreparing.json.order.queue === 'active')
+  check('…stored row agrees', tables.Order.rows.get(pA1).status === 'preparing' && tables.Order.rows.get(pA1).queue === 'active')
+
+  const toReady = await call(OrderAdminApi, 'POST', 'status', { cookie: ADMIN.cookie, body: { id: pA1, status: 'ready' } })
+  check('preparing → ready → 200, queue stays active', toReady.status === 200 && toReady.json?.order?.status === 'ready' && toReady.json.order.queue === 'active')
+  check('…stored row agrees', tables.Order.rows.get(pA1).status === 'ready' && tables.Order.rows.get(pA1).queue === 'active')
+
+  const toCollected = await call(OrderAdminApi, 'POST', 'status', { cookie: ADMIN.cookie, body: { id: pA1, status: 'collected' } })
+  check('ready → collected → 200, queue moves to done', toCollected.status === 200 && toCollected.json?.order?.status === 'collected' && toCollected.json.order.queue === 'done')
+  check('…stored row agrees', tables.Order.rows.get(pA1).status === 'collected' && tables.Order.rows.get(pA1).queue === 'done')
+
+  const toCancelled = await call(OrderAdminApi, 'POST', 'status', { cookie: ADMIN.cookie, body: { id: pP1, status: 'cancelled' } })
+  check('cancelled lands in queue done too', toCancelled.status === 200 && toCancelled.json?.order?.status === 'cancelled' && toCancelled.json.order.queue === 'done')
+  check('…stored row agrees', tables.Order.rows.get(pP1).status === 'cancelled' && tables.Order.rows.get(pP1).queue === 'done')
+
+  const missingId = await call(OrderAdminApi, 'POST', 'status', { cookie: ADMIN.cookie, body: { id: 'no-such-order', status: 'preparing' } })
+  check('an unknown id → 404 (NEG)', missingId.status === 404)
+
+  const blankId = await call(OrderAdminApi, 'POST', 'status', { cookie: ADMIN.cookie, body: { status: 'preparing' } })
+  check('no id at all → 404 (NEG)', blankId.status === 404)
+
+  {
+    const before = { ...tables.Order.rows.get(pD1) }
+    const invented = await call(OrderAdminApi, 'POST', 'status', { cookie: ADMIN.cookie, body: { id: pD1, status: 'hungry' } })
+    check('an invented status → 400 with an error field, row untouched (NEG)', invented.status === 400 && typeof invented.json?.error === 'string' && tables.Order.rows.get(pD1).status === before.status && tables.Order.rows.get(pD1).queue === before.queue)
+
+    const awaiting = await call(OrderAdminApi, 'POST', 'status', { cookie: ADMIN.cookie, body: { id: pD1, status: 'awaiting_payment' } })
+    check('awaiting_payment is Stripe\'s to clear, not the owner\'s → 400, row untouched (NEG)', awaiting.status === 400 && typeof awaiting.json?.error === 'string' && tables.Order.rows.get(pD1).status === before.status)
+  }
+
+  {
+    const before = { ...tables.Order.rows.get(pA1) }
+    const forged = await call(OrderAdminApi, 'POST', 'status', { cookie: ADMIN.cookie, body: { id: pA1, status: 'received', totalCents: 999999, customerPhone: '000-0000', paymentStatus: 'paid', code: 'forged-code' } })
+    check('status is applied…', forged.status === 200 && forged.json?.order?.status === 'received')
+    check('…but totalCents, customerPhone, paymentStatus and code are all unchanged (NEG)', forged.json.order.totalCents === before.totalCents && forged.json.order.customerPhone === before.customerPhone && forged.json.order.paymentStatus === before.paymentStatus && forged.json.order.code === before.code)
+    check('…and the stored row agrees', tables.Order.rows.get(pA1).totalCents === before.totalCents && tables.Order.rows.get(pA1).customerPhone === before.customerPhone && tables.Order.rows.get(pA1).paymentStatus === before.paymentStatus && tables.Order.rows.get(pA1).code === before.code)
+  }
+
+  const bareRoot = await call(OrderAdminApi, 'POST', '', { cookie: ADMIN.cookie, body: { id: pA1, status: 'preparing' } })
+  check('POST with no sub-path → 404: an order is created by CheckoutApi, never here (NEG)', bareRoot.status === 404)
+
+  const otherSub = await call(OrderAdminApi, 'POST', 'bogus', { cookie: ADMIN.cookie, body: { id: pA1, status: 'preparing' } })
+  check('POST to any other sub-path → 404 (NEG)', otherSub.status === 404)
+}
+
 section('a demoted admin with an unexpired cookie is refused on every entry point')
 {
   await tables.User.put({ ...DEMOTED.user, role: 'admin' })
@@ -240,6 +304,11 @@ section('a demoted admin with an unexpired cookie is refused on every entry poin
     const before = { ...tables.Order.rows.get(A1) }
     const upd = await call(OrderAdminApi, verb, A1, { cookie: DEMOTED.cookie, body: { status: 'ready' } })
     check(`…and on ${verb}, which changes nothing`, upd.status === 403 && tables.Order.rows.get(A1).status === before.status)
+  }
+  {
+    const before = { ...tables.Order.rows.get(A1) }
+    const upd = await call(OrderAdminApi, 'POST', 'status', { cookie: DEMOTED.cookie, body: { id: A1, status: 'ready' } })
+    check('…and on POST status, which changes nothing', upd.status === 403 && tables.Order.rows.get(A1).status === before.status)
   }
 
   let called = false

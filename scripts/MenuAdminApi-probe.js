@@ -8,10 +8,12 @@
 // delete removes the row and a second delete is 404; and deleting an item never touches an Order
 // row that snapshot it.
 //
-// THE UPDATE ROUTE IS PUT /MenuAdminApi/:id: Harper's REST layer answered 400 to PATCH before this
-// resource ever ran (measured on a real cluster, 2026-11-11), so every assertion below is driven
-// over BOTH verbs — PUT as the proven route, PATCH kept as an alias — to prove the body is identical
-// either way.
+// THE UPDATE AND DELETE ROUTES ARE POST /MenuAdminApi/update and POST /MenuAdminApi/delete, BODY
+// CARRIES THE id: Harper's REST layer refuses a write whose path names a record
+// (`/MenuAdminApi/:id`) on a custom Resource, with a 400 before this resource's code ever runs
+// (measured on a real cluster, 2026-11-11). `PUT`/`PATCH`/`DELETE` at `/:id` are kept working as
+// aliases, so every assertion below is driven over both shapes — the action routes as the proven
+// ones, the verb-on-id routes as aliases — to prove the body and the merge are identical either way.
 //
 // Hermetic: clock frozen, no network, no git.
 
@@ -64,6 +66,7 @@ section('anonymous is refused on every method, and writes nothing')
   const before = tables.MenuItem.rows.size
   const cases = [
     ['GET', ''], ['GET', 'seed-1'], ['POST', '', { name: 'X', priceCents: 100 }],
+    ['POST', 'update', { id: 'seed-1', name: 'X' }], ['POST', 'delete', { id: 'seed-1' }],
     ['PUT', 'seed-1', { name: 'X' }], ['PATCH', 'seed-1', { name: 'X' }], ['DELETE', 'seed-1'],
   ]
   for (const [m, p, body] of cases) {
@@ -71,6 +74,7 @@ section('anonymous is refused on every method, and writes nothing')
     check(`${m} /MenuAdminApi/${p} anonymous -> 403 auth_required, no WWW-Authenticate`, r.status === 403 && r.json?.code === 'auth_required' && !r.headers.get('www-authenticate'))
   }
   check('none of that wrote or deleted a row', tables.MenuItem.rows.size === before)
+  check('…and the seeded row itself is untouched', tables.MenuItem.rows.get('seed-1')?.name === 'Margherita')
 }
 
 section('a signed-in non-admin is refused on every method, and writes nothing (NEG)')
@@ -78,6 +82,7 @@ section('a signed-in non-admin is refused on every method, and writes nothing (N
   const before = tables.MenuItem.rows.size
   const cases = [
     ['GET', '', undefined], ['GET', 'seed-1', undefined], ['POST', '', { name: 'X', priceCents: 100 }],
+    ['POST', 'update', { id: 'seed-1', name: 'X' }], ['POST', 'delete', { id: 'seed-1' }],
     ['PUT', 'seed-1', { name: 'X' }], ['PATCH', 'seed-1', { name: 'X' }], ['DELETE', 'seed-1', undefined],
   ]
   for (const [m, p, body] of cases) {
@@ -85,6 +90,7 @@ section('a signed-in non-admin is refused on every method, and writes nothing (N
     check(`${m} /MenuAdminApi/${p} member -> 403 admin_required, no WWW-Authenticate`, r.status === 403 && r.json?.code === 'admin_required' && !r.headers.get('www-authenticate'))
   }
   check('none of that wrote or deleted a row either', tables.MenuItem.rows.size === before)
+  check('…and the seeded row itself is untouched', tables.MenuItem.rows.get('seed-1')?.name === 'Margherita')
 }
 
 section('the admin sees every item, including hidden ones')
@@ -112,6 +118,68 @@ section('create validates the price and ignores a forged id / createdAt')
   check('a valid create -> 201, with a server-minted id and createdAt (NEG)', created.status === 201 && created.json?.item?.id && created.json.item.id !== 'forged' && created.json.item.createdAt !== '1999-01-01T00:00:00.000Z')
   check('the row category defaults when absent', created.json?.item?.category === 'Other')
   check('the row is now in the table', tables.MenuItem.rows.has(created.json.item.id))
+}
+
+section('the update action route (POST /MenuAdminApi/update, the proven route): partial, and a forged id/createdAt changes neither')
+{
+  const created = await call(MenuAdminApi, 'POST', '', { cookie: ADMIN.cookie, body: { name: 'Calzone', description: 'Folded pizza', priceCents: 800, category: 'Pizza' } })
+  check('setup create -> 201', created.status === 201)
+  const id = created.json.item.id
+  const createdAt = created.json.item.createdAt
+
+  const priced = await call(MenuAdminApi, 'POST', 'update', { cookie: ADMIN.cookie, body: { id, priceCents: 999 } })
+  check('a price-only update -> 200 and the price really changed', priced.status === 200 && priced.json?.item?.priceCents === 999)
+  check('…and the row in the table agrees', tables.MenuItem.rows.get(id)?.priceCents === 999)
+  check('…name and category are untouched', priced.json?.item?.name === 'Calzone' && priced.json.item.category === 'Pizza')
+
+  const described = await call(MenuAdminApi, 'POST', 'update', { cookie: ADMIN.cookie, body: { id, description: 'Folded pizza, extra cheese' } })
+  check('a description-only update -> 200 and only the description changed', described.status === 200 && described.json?.item?.description === 'Folded pizza, extra cheese')
+  check('…name and price are untouched by the description-only update', described.json?.item?.name === 'Calzone' && described.json.item.priceCents === 999)
+
+  const toggled = await call(MenuAdminApi, 'POST', 'update', { cookie: ADMIN.cookie, body: { id, available: false } })
+  check('an availability toggle -> 200 and available is now false', toggled.status === 200 && toggled.json?.item?.available === false)
+  check('…nothing else moved', toggled.json?.item?.priceCents === 999 && toggled.json.item.description === 'Folded pizza, extra cheese')
+
+  const forged = await call(MenuAdminApi, 'POST', 'update', { cookie: ADMIN.cookie, body: { id, name: 'Calzone (edited)', createdAt: '1999-01-01T00:00:00.000Z', forgedId: 'other-id' } })
+  check('a body naming createdAt changes neither id nor createdAt (NEG)', forged.status === 200 && forged.json?.item?.id === id && forged.json.item.createdAt === createdAt && forged.json.item.name === 'Calzone (edited)')
+
+  const unknown = await call(MenuAdminApi, 'POST', 'update', { cookie: ADMIN.cookie, body: { id: 'no-such-id', name: 'X' } })
+  check('an unknown id -> 404 and writes nothing new', unknown.status === 404 && !tables.MenuItem.rows.has('no-such-id'))
+
+  const sizeBefore = tables.MenuItem.rows.size
+  const missingId = await call(MenuAdminApi, 'POST', 'update', { cookie: ADMIN.cookie, body: { name: 'X' } })
+  check('a missing id -> 404 (NEG)', missingId.status === 404)
+  const blankId = await call(MenuAdminApi, 'POST', 'update', { cookie: ADMIN.cookie, body: { id: '   ', name: 'X' } })
+  check('a blank id -> 404 (NEG)', blankId.status === 404)
+  check('neither of those created a row', tables.MenuItem.rows.size === sizeBefore)
+
+  const badPrice = await call(MenuAdminApi, 'POST', 'update', { cookie: ADMIN.cookie, body: { id, priceCents: -5 } })
+  check('a malformed price -> 400 with an error field, and the row is unchanged (NEG)', badPrice.status === 400 && typeof badPrice.json?.error === 'string' && tables.MenuItem.rows.get(id).priceCents === 999)
+
+  const extra = await call(MenuAdminApi, 'POST', 'update/extra', { cookie: ADMIN.cookie, body: { id, name: 'X' } })
+  check('a sub-path under update -> 404', extra.status === 404)
+}
+
+section('the delete action route (POST /MenuAdminApi/delete, the proven route) removes the row; a second call and an unknown id are 404')
+{
+  const created = await call(MenuAdminApi, 'POST', '', { cookie: ADMIN.cookie, body: { name: 'Side Salad', priceCents: 350 } })
+  check('setup create -> 201', created.status === 201)
+  const id = created.json.item.id
+
+  const del = await call(MenuAdminApi, 'POST', 'delete', { cookie: ADMIN.cookie, body: { id } })
+  check('POST /MenuAdminApi/delete -> { ok: true } and the row is gone', del.status === 200 && del.json?.ok === true && !tables.MenuItem.rows.has(id))
+  const again = await call(MenuAdminApi, 'POST', 'delete', { cookie: ADMIN.cookie, body: { id } })
+  check('deleting it again -> 404', again.status === 404)
+  const unknown = await call(MenuAdminApi, 'POST', 'delete', { cookie: ADMIN.cookie, body: { id: 'no-such-id' } })
+  check('deleting an id that never existed -> 404', unknown.status === 404)
+  const missingId = await call(MenuAdminApi, 'POST', 'delete', { cookie: ADMIN.cookie, body: {} })
+  check('a missing id -> 404 (NEG)', missingId.status === 404)
+
+  const extra = await call(MenuAdminApi, 'POST', 'delete/extra', { cookie: ADMIN.cookie, body: { id } })
+  check('a sub-path under delete -> 404', extra.status === 404)
+
+  const unknownAction = await call(MenuAdminApi, 'POST', 'archive', { cookie: ADMIN.cookie, body: { id: 'seed-hidden' } })
+  check('an unrecognized POST action -> 404 and writes nothing', unknownAction.status === 404 && tables.MenuItem.rows.has('seed-hidden'))
 }
 
 section('the update route (PUT, proven on the cluster) and its PATCH alias are both partial: one field changes, the rest survive')

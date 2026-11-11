@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert } from '@/components/ui/alert'
+import { go } from '@/api/client'
 import { getStoreInfo } from '@/api/store-info'
 import { quoteCart, placeOrder } from '@/api/checkout'
 import { useBasket, clearBasket } from '@/lib/basket'
@@ -112,7 +113,11 @@ export default function Checkout () {
       })
       clearBasket()
       if (res.paymentUrl) {
-        location.href = res.paymentUrl
+        // Through go() like every other hard navigation (rule 30). Stripe's Checkout URL is
+        // absolute and go() returns an off-origin URL untouched, so this costs the payment path
+        // nothing — and on the day this value is ever site-relative, the preview copy keeps the
+        // person in the preview instead of handing them to the published app.
+        location.href = go(res.paymentUrl)
       } else {
         navigate(`/order/${res.order.code}`)
       }

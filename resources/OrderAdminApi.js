@@ -2,23 +2,31 @@
 // ONLY resource in the app that serves customer names, phone numbers and delivery addresses
 // (CLAUDE.md §9), so every entry point — including the live stream — opens with requireAdmin().
 //
-//   GET   /OrderAdminApi?queue=active|done|pending_payment   the named queue, newest first, with counts
-//   GET   /OrderAdminApi/:id                                  one order in full, or 404
-//   PUT   /OrderAdminApi/:id   { status }                     advance the status; the queue is derived
+//   GET    /OrderAdminApi?queue=active|done|pending_payment   the named queue, newest first, with counts
+//   GET    /OrderAdminApi/:id                                  one order in full, or 404
+//   POST   /OrderAdminApi/status   { id, status }              advance the status; the queue is derived
 //                                                              from it so the two can never disagree.
-//                                                              PUT is the route the front end calls: on
-//                                                              a real cluster (measured 2026-11-11)
-//                                                              Harper's REST layer answered PATCH with a
-//                                                              400 before this resource's patch() ever
-//                                                              ran — PATCH is not a verb any seeded or
-//                                                              reviewed resource in this platform uses,
-//                                                              while PUT is the proven update verb
-//                                                              (MembersApi, StoreSettingsApi, AdminApi,
-//                                                              AccountApi). PATCH is kept as an alias
-//                                                              for anything that does reach it.
+//                                                              THIS is the route the front end calls, and
+//                                                              the id travels in the BODY rather than the
+//                                                              path, because the path is what was wrong:
+//                                                              on a real cluster (measured 2026-11-11)
+//                                                              Harper's REST layer refuses a write aimed at
+//                                                              a RECORD path — `/OrderAdminApi/:id` — on a
+//                                                              custom Resource with a 400 before this
+//                                                              module's put() or patch() ever ran, for
+//                                                              every verb, not only PATCH (an earlier fix
+//                                                              moved this from PATCH to PUT on the mistaken
+//                                                              theory that the verb was the problem, and the
+//                                                              403 persisted). An action path with no record
+//                                                              segment — `/OrderAdminApi/status` — is never
+//                                                              refused that way, the same shape
+//                                                              `AuthApi/request-link`, `CheckoutApi/order`
+//                                                              and `AdminApi/users/invite` already use live.
+//   PUT    /OrderAdminApi/:id   { status }                     kept working as an alias for anything that
+//   PATCH  /OrderAdminApi/:id   { status }                     still reaches them; same shared merge.
 //   connect (SSE)                                             live Order arrivals/changes, admin-only
 //
-// No POST, no DELETE: an order is created by CheckoutApi and never removed.
+// No DELETE: an order is created by CheckoutApi and never removed.
 
 import { Resource } from 'harperdb'
 import { db } from '../lib/db.js'
@@ -42,14 +50,43 @@ export class OrderAdminApi extends Resource {
     })
   }
 
+  /**
+   * The route the front end calls. The id lives in the body, not the path — see the header
+   * comment for the measurement that this is required, not a stylistic choice.
+   */
+  async post (target, data) {
+    target.checkPermission = false
+    return runAuthed(async () => {
+      await requireAdmin(this)
+      const [sub] = segmentsOf(target)
+      if (sub !== 'status') return json({ error: 'not found' }, 404)
+      const body = data && typeof data === 'object' ? data : {}
+      return applyStatus(String(body.id ?? '').trim(), body)
+    })
+  }
+
+  // Kept working as aliases for anything that still reaches a record path directly; same
+  // shared merge as the action route above.
   async put (target, data) {
     target.checkPermission = false
-    return applyStatus(this, target, data)
+    return runAuthed(async () => {
+      await requireAdmin(this)
+      const [id, sub] = segmentsOf(target)
+      if (!id || sub) return json({ error: 'not found' }, 404)
+      const body = data && typeof data === 'object' ? data : {}
+      return applyStatus(id, body)
+    })
   }
 
   async patch (target, data) {
     target.checkPermission = false
-    return applyStatus(this, target, data)
+    return runAuthed(async () => {
+      await requireAdmin(this)
+      const [id, sub] = segmentsOf(target)
+      if (!id || sub) return json({ error: 'not found' }, 404)
+      const body = data && typeof data === 'object' ? data : {}
+      return applyStatus(id, body)
+    })
   }
 
   /**
@@ -82,26 +119,22 @@ export class OrderAdminApi extends Resource {
 }
 
 /**
- * Advance an order's status, shared by put() and patch() (see the header comment for why PUT is
- * the route the front end uses). `self` is the resource instance, for requireAdmin().
+ * Advance an order's status, shared by post('status'), put() and patch() — one merge, called
+ * once the caller is already proven admin and `id` already pulled from wherever its route
+ * carries it (body for the action route, the path segment for the aliases).
  */
-async function applyStatus (self, target, data) {
-  return runAuthed(async () => {
-    await requireAdmin(self)
-    const [id, sub] = segmentsOf(target)
-    if (!id || sub) return json({ error: 'not found' }, 404)
-    const existing = await db.Order.get(id)
-    if (!existing) return json({ error: 'not found' }, 404)
-    const body = data && typeof data === 'object' ? data : {}
-    const status = body.status
-    if (!OWNER_SETTABLE_STATUSES.includes(status)) {
-      return json({ error: `status must be one of ${OWNER_SETTABLE_STATUSES.join(', ')}` }, 400)
-    }
-    // Only status and the queue it implies are ever written: everything else — id, code,
-    // items, every total, paymentStatus, paymentRef, the customer's details — is restated
-    // from the stored row, so a body carrying those fields changes nothing.
-    const row = { ...existing, status, queue: queueForStatus(status) }
-    await db.Order.put(row)
-    return json({ order: adminOrderView(row) })
-  })
+async function applyStatus (id, body) {
+  if (!id) return json({ error: 'not found' }, 404)
+  const existing = await db.Order.get(id)
+  if (!existing) return json({ error: 'not found' }, 404)
+  const status = body.status
+  if (!OWNER_SETTABLE_STATUSES.includes(status)) {
+    return json({ error: `status must be one of ${OWNER_SETTABLE_STATUSES.join(', ')}` }, 400)
+  }
+  // Only status and the queue it implies are ever written: everything else — id, code,
+  // items, every total, paymentStatus, paymentRef, the customer's details — is restated
+  // from the stored row, so a body carrying those fields changes nothing.
+  const row = { ...existing, status, queue: queueForStatus(status) }
+  await db.Order.put(row)
+  return json({ order: adminOrderView(row) })
 }

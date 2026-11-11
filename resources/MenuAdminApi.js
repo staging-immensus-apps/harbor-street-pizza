@@ -1,16 +1,26 @@
 // Owner-only menu editor. One Resource per entity; the class is MenuAdminApi and the table is
 // MenuItem (rule 2). Every item including hidden ones, for the owner to edit.
 //
-//   GET    /MenuAdminApi/          every item, sortMenu + adminMenuItem
-//   GET    /MenuAdminApi/:id       one item, or 404
-//   POST   /MenuAdminApi/         { name, description?, priceCents, category?, available?, sortOrder? } → 201 { item }
-//   PUT    /MenuAdminApi/:id      partial update → { item } — the update route. Harper's REST layer
-//                                 answered 400 to PATCH before this resource ever ran (measured on
-//                                 the cluster, 2026-11-11), so the update is served on PUT, the verb
-//                                 the platform's own worked examples use (MembersApi, StoreSettingsApi,
-//                                 AdminApi, AccountApi); PATCH is kept working as an alias, same body
-//                                 shape, in case a client still sends it.
-//   DELETE /MenuAdminApi/:id      → { ok: true }
+//   GET    /MenuAdminApi/            every item, sortMenu + adminMenuItem
+//   GET    /MenuAdminApi/:id         one item, or 404
+//   POST   /MenuAdminApi/            { name, description?, priceCents, category?, available?, sortOrder? } → 201 { item }
+//   POST   /MenuAdminApi/update      { id, ...partial fields } → { item } — THE update route.
+//   POST   /MenuAdminApi/delete      { id } → { ok: true } — THE delete route.
+//
+// THE ID TRAVELS IN THE BODY AND THE PATH NAMES AN ACTION, never a record. Measured live on this
+// deployment, 2026-11-11: Harper's REST layer refuses a write whose path names a record
+// (`/MenuAdminApi/:id`) on a custom Resource with a 400 BEFORE this resource's code ever runs —
+// evidence was the bare `"Bad Request"` statusText reaching the browser, which `errorText()`
+// (src/lib/format.ts) only falls back to when the JSON body carries no `error` key, and every 400
+// this resource itself emits carries one. `PUT /StoreSettingsApi`, which has no record segment,
+// answered 200 throughout the same session. So the verb was never the variable; the fix is the
+// shape already proven live elsewhere in this app (`POST /AuthApi/request-link`,
+// `POST /CheckoutApi/order`, `POST /AdminApi/users/invite`): an action name after the resource,
+// the id inside the posted body.
+//
+// `PUT /MenuAdminApi/:id`, `PATCH /MenuAdminApi/:id` and `DELETE /MenuAdminApi/:id` are KEPT
+// working exactly as before, as aliases for anything that still reaches them — sharing the same
+// merge and delete logic as the action routes below rather than duplicating it.
 //
 // Every method is admin-only (rule: an app with no customer accounts, only the owner signs in).
 // requireAdmin() re-reads the User row on every call, so a demoted or deactivated admin is refused
@@ -52,26 +62,36 @@ export class MenuAdminApi extends Resource {
     target.checkPermission = false
     return runAuthed(async () => {
       await requireAdmin(this)
-      const [id] = segmentsOf(target)
-      if (id) return json({ error: 'not found' }, 404)
+      const [action, extra] = segmentsOf(target)
       const body = data && typeof data === 'object' ? data : {}
-      const fields = validateMenuItem(body, { partial: false })
-      if (fields.error) return json({ error: fields.error }, 400)
-      const now = new Date().toISOString()
-      const row = { id: crypto.randomUUID(), ...fields.value, createdAt: now, updatedAt: now }
-      await db.MenuItem.put(row)
-      return json({ item: adminMenuItem(row) }, 201)
+      if (!action) return createItem(body)
+      if (extra) return json({ error: 'not found' }, 404)
+      if (action === 'update') return updateItem(String(body.id ?? '').trim(), body)
+      if (action === 'delete') return deleteItem(String(body.id ?? '').trim())
+      return json({ error: 'not found' }, 404)
     })
   }
 
   async put (target, data) {
     target.checkPermission = false
-    return applyUpdate(this, target, data)
+    return runAuthed(async () => {
+      await requireAdmin(this)
+      const [id, sub] = segmentsOf(target)
+      if (!id || sub) return json({ error: 'not found' }, 404)
+      const body = data && typeof data === 'object' ? data : {}
+      return updateItem(id, body)
+    })
   }
 
   async patch (target, data) {
     target.checkPermission = false
-    return applyUpdate(this, target, data)
+    return runAuthed(async () => {
+      await requireAdmin(this)
+      const [id, sub] = segmentsOf(target)
+      if (!id || sub) return json({ error: 'not found' }, 404)
+      const body = data && typeof data === 'object' ? data : {}
+      return updateItem(id, body)
+    })
   }
 
   async delete (target) {
@@ -80,31 +100,44 @@ export class MenuAdminApi extends Resource {
       await requireAdmin(this)
       const [id, sub] = segmentsOf(target)
       if (!id || sub) return json({ error: 'not found' }, 404)
-      const existing = await db.MenuItem.get(id)
-      if (!existing) return json({ error: 'not found' }, 404)
-      await db.MenuItem.delete(id)
-      return json({ ok: true })
+      return deleteItem(id)
     })
   }
 }
 
+/** The create body, unchanged from before the action-route split. */
+async function createItem (body) {
+  const fields = validateMenuItem(body, { partial: false })
+  if (fields.error) return json({ error: fields.error }, 400)
+  const now = new Date().toISOString()
+  const row = { id: crypto.randomUUID(), ...fields.value, createdAt: now, updatedAt: now }
+  await db.MenuItem.put(row)
+  return json({ item: adminMenuItem(row) }, 201)
+}
+
 /**
- * The partial-update body shared by put() and patch() (rule 1 in the task that split this out:
- * same validation, same merge, same response, served on either verb). Semantics stay PARTIAL for
- * both — the editor dialog sends only the changed fields.
+ * The partial-update body shared by the `update` action route and the put()/patch() aliases:
+ * same validation, same merge, same response however the id arrived. Semantics stay PARTIAL —
+ * the editor dialog sends only the changed fields. `id` and `createdAt` are restated from the
+ * stored row rather than trusted from the body, even though validateMenuItem() already drops
+ * unknown keys, so a forged id or createdAt in the body changes neither.
  */
-async function applyUpdate (self, target, data) {
-  return runAuthed(async () => {
-    await requireAdmin(self)
-    const [id, sub] = segmentsOf(target)
-    if (!id || sub) return json({ error: 'not found' }, 404)
-    const existing = await db.MenuItem.get(id)
-    if (!existing) return json({ error: 'not found' }, 404)
-    const body = data && typeof data === 'object' ? data : {}
-    const fields = validateMenuItem(body, { partial: true })
-    if (fields.error) return json({ error: fields.error }, 400)
-    const row = { ...existing, ...fields.value, id: existing.id, createdAt: existing.createdAt, updatedAt: new Date().toISOString() }
-    await db.MenuItem.put(row)
-    return json({ item: adminMenuItem(row) })
-  })
+async function updateItem (id, body) {
+  if (!id) return json({ error: 'not found' }, 404)
+  const existing = await db.MenuItem.get(id)
+  if (!existing) return json({ error: 'not found' }, 404)
+  const fields = validateMenuItem(body, { partial: true })
+  if (fields.error) return json({ error: fields.error }, 400)
+  const row = { ...existing, ...fields.value, id: existing.id, createdAt: existing.createdAt, updatedAt: new Date().toISOString() }
+  await db.MenuItem.put(row)
+  return json({ item: adminMenuItem(row) })
+}
+
+/** Shared by the `delete` action route and the DELETE verb alias. */
+async function deleteItem (id) {
+  if (!id) return json({ error: 'not found' }, 404)
+  const existing = await db.MenuItem.get(id)
+  if (!existing) return json({ error: 'not found' }, 404)
+  await db.MenuItem.delete(id)
+  return json({ ok: true })
 }

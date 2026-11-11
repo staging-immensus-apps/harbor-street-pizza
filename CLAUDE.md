@@ -572,6 +572,23 @@ each job. These are the template's, for hazards an app's own code can hit and §
   verifier sharing one function prove only that they agree.
 - **A jsdom child never exits on its own**: its timers keep the event loop alive until the kill →
   `process.exit(0)` after the verdict is written.
+**This app's own**
+
+- **A write whose PATH NAMES A RECORD is refused by Harper before the resource runs**: every menu
+  edit and every order status change answered a bodyless `400` on the live `/preview` deployment —
+  `PATCH /MenuAdminApi/<id>` for any field, `PUT /OrderAdminApi/<id>` for Mark preparing, Mark ready
+  and Cancel alike — while `PUT /StoreSettingsApi`, which has no record segment, answered 200
+  throughout. It cost two fix loops, because the first read it as a verb problem and swapping the
+  update onto PUT changed nothing: the variable is the record path, not the verb. The tell that it
+  is Harper and not us is the bare statusText `"Bad Request"` in the page's banner — `errorText()`
+  reaches `res.statusText` only when the JSON body carries no `error` key, and every 400 this app
+  writes carries one, so a "Bad Request" banner means our handler never ran → **an admin write takes
+  its id in the BODY and names an ACTION in the path** (`POST /MenuAdminApi/update`,
+  `POST /MenuAdminApi/delete`, `POST /OrderAdminApi/status`), the shape proven live here by
+  `POST /AuthApi/request-link`, `POST /CheckoutApi/order` and `POST /AdminApi/users/invite`. Reads by
+  id (`GET /OrderConfirmationApi/<code>`) are unaffected and stay as they are → `MenuAdminApi-probe`
+  and `OrderAdminApi-probe` drive the action routes; the verb-on-id handlers are kept as aliases, so
+  a hermetic probe alone would not have caught this and did not.
 - **A `CONFIG.env` in the working tree reds suites that pass in CI**: `lib/config.js` reads that file
   and ignores `process.env` (rule 30), and CI has no such file → move it aside before believing the red.
 

@@ -13,11 +13,21 @@ export function getOrderById(id: string): Promise<OrderAdminOneResponse> {
   return api.get<OrderAdminOneResponse>(`OrderAdminApi/${encodeURIComponent(id)}`)
 }
 
-/** PUT, not PATCH: resources/OrderAdminApi.js records that Harper's REST layer answered PATCH with a
- * 400 before the resource's own handler ran (measured on a real cluster), and PUT is the update verb
- * every reviewed resource in this platform uses. The resource keeps patch() as an alias. */
+/**
+ * THE ORDER'S ID TRAVELS IN THE BODY, NOT IN THE PATH. `PUT /OrderAdminApi/<id>` answered 400 on the
+ * live /preview deployment for every action — Mark preparing, Mark ready, Cancel — across distinct
+ * orders, and so did PATCH before it. The verb was never the variable: the refusal is Harper's REST
+ * layer declining a write aimed at a RECORD PATH on a custom Resource, which is why swapping PATCH
+ * for PUT changed nothing and why `PUT /StoreSettingsApi` (no record segment) was 200 throughout.
+ * The page showed the bare statusText "Bad Request", which `errorText()` reaches only when the body
+ * has no `error` key — so our handler, whose every 400 names the allowed statuses, never ran.
+ *
+ * `POST /OrderAdminApi/status` is the shape proven live here (`POST /CheckoutApi/order`,
+ * `POST /AuthApi/request-link`). The signature is unchanged, so src/pages/admin/Orders.tsx is not
+ * touched; the resource keeps put() and patch() at `/<id>` for anything that still reaches them.
+ */
 export function setOrderStatus(id: string, status: OrderStatus): Promise<OrderAdminOneResponse> {
-  return api.put<OrderAdminOneResponse>(`OrderAdminApi/${encodeURIComponent(id)}`, { status })
+  return api.post<OrderAdminOneResponse>('OrderAdminApi/status', { id, status })
 }
 
 /** The URL an `EventSource` opens for the live queue — the same path as the list, which answers the
