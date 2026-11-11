@@ -1,0 +1,145 @@
+{
+  "verdict": "FAILED",
+  "version": {
+    "sha": null,
+    "branch": null,
+    "stamp": null
+  },
+  "stories": [
+    {
+      "id": "browse-menu",
+      "status": "pass",
+      "severity": "blocker",
+      "area": null,
+      "message": "Anonymous customer loaded the site and saw all menu items (drinks, pizzas, sides) with names, descriptions and prices in GBP. Tested light/dark and mobile/desktop widths, no console errors.",
+      "evidenceTier": 1,
+      "evidence": [
+        "GET /preview/ shows Forno Vicino menu with Drinks/Pizzas/Sides categories, each item has name, description, price and Add button"
+      ],
+      "screenshots": [
+        "job_5f38ae9061833ee8-p1-1-light-375.png",
+        "job_5f38ae9061833ee8-p1-2-dark-1280.png"
+      ],
+      "signedInAs": null
+    },
+    {
+      "id": "choose-pickup-or-delivery",
+      "status": "pass",
+      "severity": "blocker",
+      "area": null,
+      "message": "Checkout page defaults to Pickup (Name/Phone only, no address fields). Selecting Delivery reveals Delivery address + Postcode fields, adds the £4.00 delivery fee to the total (£2.00 -> £6.00) and updates the ready estimate to 45 min.",
+      "evidenceTier": 1,
+      "evidence": [
+        "/preview/checkout Pickup: Name/Phone only, total £2.00, estimate 25 min",
+        "/preview/checkout after clicking Delivery: Delivery address, Postcode fields appear, Delivery fee £4.00 added, total £6.00, estimate 45 min"
+      ],
+      "screenshots": [
+        "job_5f38ae9061833ee8-p1-3-light-375.png",
+        "job_5f38ae9061833ee8-p1-4-dark-1280.png"
+      ],
+      "signedInAs": null
+    },
+    {
+      "id": "pay-online",
+      "status": "not_testable",
+      "severity": null,
+      "area": null,
+      "message": "No Stripe key is configured on this deployment: placing an order returned 201 from POST /CheckoutApi/order immediately with paymentStatus 'Pay at store', with no Stripe Checkout Session or redirect. Per the app's own spec this is the documented fallback when no Stripe key is present, so it is expected behaviour and not a defect. The online-payment path (Stripe Checkout Session + webhook confirmation) needs a real Stripe key / a real third party and cannot be exercised here, so 'order only placed once payment succeeds' cannot be verified on this deployment.",
+      "evidenceTier": 1,
+      "evidence": [
+        "POST https://harbor-street-pizza.immensus-staging.app/preview/CheckoutApi/order -> 201, order created with paymentStatus 'Pay at store', no Stripe redirect"
+      ],
+      "screenshots": [],
+      "signedInAs": null
+    },
+    {
+      "id": "order-confirmation",
+      "status": "pass",
+      "severity": "major",
+      "area": null,
+      "message": "After placing an order (pay-at-store path, since no Stripe key is configured), customer is shown a confirmation screen at /order/:code with order number, status (Received), payment state (Pay at store), fulfilment (Pickup), itemised lines, total, and an 'Estimated ready' field. Note: 'Estimated ready' shows only a calendar date with no clock time, unlike the checkout page's relative estimate ('around 25 min') -- logged as a minor frontend defect since a ready estimate is present but less precise than it could be.",
+      "evidenceTier": 1,
+      "evidence": [
+        "GET /preview/OrderConfirmationApi/ZLC2osuvcH0vES_ljzGPPaY5XrPkKs7J -> 200, confirmation page renders order summary, status, payment, fulfilment and estimated-ready date"
+      ],
+      "screenshots": [
+        "job_5f38ae9061833ee8-p1-5-light-375.png"
+      ],
+      "signedInAs": null
+    },
+    {
+      "id": "view-new-orders",
+      "status": "fail",
+      "severity": "blocker",
+      "area": "frontend",
+      "message": "Signed in as admin (owner@example.com via password) on /manage/orders. Placed two new orders from separate anonymous customer sessions while the owner's orders page stayed open with no navigation. The page made polling GET /OrderAdminApi?queue=active requests (200 responses) after each new order was placed, but the new order never appeared in the rendered list across multiple poll cycles over well more than 15 seconds. Reloading /manage/orders immediately showed both new orders at the top of the queue with correct items, pickup/delivery choice and payment status -- so the backend data and first-load rendering are correct, but the 'arrives without reloading' behaviour the story requires does not work.",
+      "evidenceTier": 1,
+      "evidence": [
+        "Placed orders #ywDC7CNK and #sFUI3AL8 from anonymous sessions; GET /OrderAdminApi?queue=active fired on the open admin page (200) after each but the visible list text was unchanged across repeated reads",
+        "browser_navigate reload of /manage/orders immediately showed both new orders at the top of the queue"
+      ],
+      "screenshots": [
+        "job_5f38ae9061833ee8-p2-1-light-1280.png",
+        "job_5f38ae9061833ee8-p2-2-dark-375.png"
+      ],
+      "signedInAs": "admin"
+    },
+    {
+      "id": "update-menu",
+      "status": "fail",
+      "severity": "blocker",
+      "area": "backend",
+      "message": "Signed in as admin (owner@example.com, password). On /manage/menu, clicked Edit on 'Cola' and changed its price from £2.00 to £2.25, then Save. PATCH /MenuAdminApi/menu-cola returned 400 Bad Request and the dialog showed a 'Bad Request' error banner; the list still showed Cola at £2.00 afterward, confirming the edit was not saved.",
+      "evidenceTier": 1,
+      "evidence": [
+        "PATCH https://harbor-street-pizza.immensus-staging.app/preview/MenuAdminApi/menu-cola -> 400",
+        "Dialog rendered 'Bad Request' banner; Cola still listed at £2.00 after closing the dialog"
+      ],
+      "screenshots": [
+        "job_5f38ae9061833ee8-p2-3-light-375.png"
+      ],
+      "signedInAs": "admin"
+    },
+    {
+      "id": "update-order-status",
+      "status": "fail",
+      "severity": "major",
+      "area": "backend",
+      "message": "Signed in as admin (owner@example.com, password). On /manage/orders, clicking 'Mark preparing' on a Received order (own order #sFUI3AL8, id 05258a5a-c5cc-4e23-9657-d0e1887729ce) returned PATCH /OrderAdminApi/<id> 400 and the page showed a 'Bad Request' error banner; the order stayed 'Received'. Clicking 'Mark ready' on a different order (order-0002, #Vb3Nm6Xs) also returned 400. Reproduced on two different orders, so the status-update action is broken, not an isolated data issue.",
+      "evidenceTier": 1,
+      "evidence": [
+        "PATCH https://harbor-street-pizza.immensus-staging.app/preview/OrderAdminApi/05258a5a-c5cc-4e23-9657-d0e1887729ce -> 400",
+        "PATCH https://harbor-street-pizza.immensus-staging.app/preview/OrderAdminApi/order-0002 -> 400",
+        "Page rendered 'Bad Request' banner, order status unchanged on screen"
+      ],
+      "screenshots": [],
+      "signedInAs": "admin"
+    }
+  ],
+  "cross": {
+    "authScope": "not_testable",
+    "anonymousAccess": "pass",
+    "roleEscalation": "pass",
+    "rollbackReady": "not_testable"
+  },
+  "anonymousOpen": [],
+  "consoleErrors": [],
+  "defects": [
+    {
+      "area": "frontend",
+      "message": "Seeded demo orders (e.g. #Hs7Qk2mV, #Zq8Wd1nY, #Vb3Nm6Xs, #Ck9Tf2Rb) show £0.00 for every individual line item in the owner's order queue (e.g. 'Margherita × 2  £0.00', 'Pepperoni × 3  £0.00') even though the order total is correct. Only orders freshly created during this walk showed correct per-line prices. This is a display bug affecting how snapshot item prices are rendered/read for at least the seeded data on /manage/orders."
+    },
+    {
+      "area": "frontend",
+      "message": "On the order confirmation page (/order/:code), the 'Estimated ready' field shows only a calendar date (e.g. 'Nov 11, 2026') with no time of day, which is uninformative for same-day ASAP orders; the checkout page shows a more useful relative estimate ('around 25 min')."
+    }
+  ],
+  "accessTest": {
+    "result": "not_testable",
+    "reached": [],
+    "tried": [],
+    "untested": [],
+    "leftover": [],
+    "reason": "the plan makes no resource owner-scoped"
+  }
+}
