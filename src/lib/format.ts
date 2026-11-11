@@ -1,11 +1,24 @@
-/** ISO timestamp → YYYY-MM-DD, or a dash. Every list shows dates this way. */
-export function day(iso: string | null | undefined): string {
-  return iso ? String(iso).slice(0, 10) : '—'
+/**
+ * A timestamp → YYYY-MM-DD, or a dash. Every list shows dates this way.
+ *
+ * Takes a number as well as a string: a Harper-assigned @createdTime/@updatedTime field (MenuItem,
+ * Order) reads back as epoch milliseconds, while a row written before a fix stopped naming the
+ * field by hand may still hold the old ISO string — both are real and both must render.
+ */
+export function day(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '—'
+  const when = new Date(value)
+  if (Number.isNaN(when.getTime())) return '—'
+  return when.toISOString().slice(0, 10)
 }
 
-/** ISO timestamp → a date a person reads, in their own locale ("Nov 5, 2026"), or a dash. */
-export function shortDate(iso: string | null | undefined): string {
-  return iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+/** A timestamp → a date a person reads, in their own locale ("Nov 5, 2026"), or a dash. Accepts an
+ * epoch-millisecond number or an ISO string, for the same reason as day() above. */
+export function shortDate(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '—'
+  const when = new Date(value)
+  if (Number.isNaN(when.getTime())) return '—'
+  return when.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 /** The error string the API client throws with, or a fallback. */
