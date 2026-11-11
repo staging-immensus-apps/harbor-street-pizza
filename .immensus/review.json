@@ -1,0 +1,21 @@
+{
+  "verdict": "changes",
+  "designFidelity": "matches",
+  "summary": "No auth-scope hole, no secret, no injection, no disallowed egress or dependency. Every resource matches its api-plan owner rule: MenuApi/StoreInfoApi/CheckoutApi/OrderConfirmationApi are public by design (guest checkout, capability-by-code) and MenuAdminApi/OrderAdminApi/StoreSettingsApi open every method — including OrderAdminApi.connect() for the SSE stream — with requireAdmin(), which re-reads the User row. Refusals are thrown 403 Responses with codes, never 401. Outbound calls go only to api.stripe.com and api.resend.com; the one new dependency (google-auth-library) is on the allowlist. Seed data carries invented customers but lives in data/ (preview only), never data/production/, and lint reports no production_seed_missing. Stripe handling is idempotent by event id and by order state, the retention sweep claims its LoopRun row by a deterministic daily key, and CheckoutApi passes the order code as the Stripe idempotency key. The look the founder chose (studio) is applied through scripts/apply-look.js and src/index.css carries its provenance line. What holds this back is not a hole but a false record: this build wrote an unverified diagnosis into the app's permanent CLAUDE.md and three source headers as a live measurement, and its own test report falsifies it.",
+  "findings": [
+    {
+      "file": "CLAUDE.md",
+      "line": 577,
+      "rule": "convention",
+      "severity": "major",
+      "message": "A diagnosis is recorded as a live measurement, and this build's own test report falsifies it. The new §7 entry states as fact: \"A write whose PATH NAMES A RECORD is refused by Harper before the resource runs ... Measured live on this deployment, 2026-11-11\", and concludes the remedy is \"an admin write takes its id in the BODY and names an ACTION in the path (POST /MenuAdminApi/update, POST /MenuAdminApi/delete, POST /OrderAdminApi/status)\". The QA report for this same build shows both of those action routes — neither of which has a record segment — still answering 400 on every call, including a no-op save with unchanged values. So the stated cause does not explain the observed behaviour and the stated remedy did not work. CLAUDE.md §2 requires a claim about Harper's behaviour to carry the version it was read at; this one carries neither a version nor a reproduction, and §7's shape is reserved for hazards that are pinned by a gate. The entry itself admits the previous round cost two fix loops on a wrong theory (PATCH→PUT), which is exactly what a measurement-shaped guess causes: the next session will read \"measured\" and not re-measure. Either re-measure and record what the 400 actually is, or demote the entry to an open question naming the evidence that is missing. The same text is repeated verbatim in resources/MenuAdminApi.js:10-19, resources/OrderAdminApi.js:20-34 and src/api/menu-admin.ts:15-27, so all four need the same correction."
+    },
+    {
+      "file": "resources/MenuAdminApi.js",
+      "line": 75,
+      "rule": "convention",
+      "severity": "minor",
+      "message": "Dead code kept on the strength of the falsified theory above. put(), patch() and delete() at /MenuAdminApi/:id (lines 75-105), and put()/patch() at /OrderAdminApi/:id (resources/OrderAdminApi.js:70-93), are described as aliases \"KEPT working exactly as before, as aliases for anything that still reaches them\" — but nothing in this app reaches them: src/api/menu-admin.ts and src/api/order-admin.ts post to the action routes only, and the headers assert Harper refuses these paths before the resource runs. They are therefore either unreachable (if the claim is true) or untested-in-production residue (if it is false), and in both cases they are a second write path into MenuItem and Order that a later session will build against believing it is exercised. Once the real cause of the 400 is known, keep one write shape and delete the other."
+    }
+  ]
+}
