@@ -20,6 +20,37 @@ export function money(cents: number | null | undefined): string {
   return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(value / 100)
 }
 
+/**
+ * What one order line costs, in whole cents.
+ *
+ * The extended total is only on a line that came back from a quote; the snapshot stored on an order
+ * is `{menuItemId, name, priceCents, quantity}` (CLAUDE.md §8), so price × quantity is the answer
+ * for every other line. Reading `lineTotalCents` raw showed every seeded order's lines as £0.00.
+ */
+export function lineTotal(line: { priceCents?: number | null; quantity?: number | null; lineTotalCents?: number | null } | null | undefined): number {
+  if (Number.isFinite(line?.lineTotalCents)) return line?.lineTotalCents as number
+  const price = Number.isFinite(line?.priceCents) ? (line?.priceCents as number) : 0
+  const quantity = Number.isFinite(line?.quantity) ? (line?.quantity as number) : 0
+  return price * quantity
+}
+
+/**
+ * A ready-by instant as a person reads it — "7:45 pm" for today, "Nov 12, 7:45 pm" otherwise.
+ *
+ * Every order here is ASAP (CLAUDE.md §1), so the useful part of the estimate is the TIME OF DAY;
+ * a bare calendar date tells a customer waiting twenty-five minutes nothing at all.
+ */
+export function readyTime(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const when = new Date(iso)
+  if (Number.isNaN(when.getTime())) return '—'
+  const clock = when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  const today = new Date()
+  const sameDay = when.getFullYear() === today.getFullYear() && when.getMonth() === today.getMonth() && when.getDate() === today.getDate()
+  if (sameDay) return clock
+  return `${when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}, ${clock}`
+}
+
 /** A minutes estimate read back as "25–45 min" or "around 25 min" when there is one number. */
 export function minutesEstimate(minutes: number | null | undefined): string {
   return Number.isFinite(minutes) ? `around ${minutes} min` : '—'

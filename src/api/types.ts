@@ -94,13 +94,20 @@ export type QuoteRequest = {
   deliveryPostcode?: string
 }
 
-/** A priced line, snapshotted from MenuItem at the moment of pricing. */
+/** A priced line, snapshotted from MenuItem at the moment of pricing.
+ *
+ * `lineTotalCents` is OPTIONAL on purpose. The stored snapshot an order carries is
+ * `{menuItemId, name, priceCents, quantity}` (CLAUDE.md §8, lib/orders.js) — the extended total is
+ * something `lib/pricing.js` adds while quoting, so an order written by any other route (the seeded
+ * preview orders, an order placed before that field existed) has the price and the quantity and no
+ * line total. Read it through `lineTotal()` in src/lib/format.ts, never directly: reading it raw is
+ * what showed every seeded line as £0.00 in the owner's queue. */
 export type PricedLine = {
   menuItemId: string
   name: string
   priceCents: number
   quantity: number
-  lineTotalCents: number
+  lineTotalCents?: number
 }
 
 /** POST /CheckoutApi/quote — writes nothing; a 400 (empty basket, bad quantity, item gone) throws. */

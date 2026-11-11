@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { getOrderByCode } from '@/api/order-confirmation'
-import { money, shortDate, errorText } from '@/lib/format'
+import { money, shortDate, readyTime, lineTotal, errorText } from '@/lib/format'
 import type { OrderConfirmationView } from '@/api/types'
 
 const POLL_MS = 15000
@@ -165,7 +165,7 @@ export default function OrderConfirmation () {
               {order.readyEstimate && (
                 <div>
                   <p className="text-muted-foreground">Estimated ready</p>
-                  <p className="font-medium">{shortDate(order.readyEstimate)}</p>
+                  <p className="font-medium">{readyTime(order.readyEstimate)}</p>
                 </div>
               )}
             </div>
@@ -183,7 +183,7 @@ export default function OrderConfirmation () {
               {items.map((line, i) => (
                 <div key={`${line.menuItemId}-${i}`} className="flex items-center justify-between gap-3 text-sm">
                   <span className="min-w-0 truncate">{line.quantity} × {line.name}</span>
-                  <span className="shrink-0">{money(line.lineTotalCents)}</span>
+                  <span className="shrink-0">{money(lineTotal(line))}</span>
                 </div>
               ))}
             </div>

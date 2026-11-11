@@ -5,9 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
 import { Dialog } from '@/components/ui/dialog'
-import { BASE } from '@/api/client'
-import { listOrders, setOrderStatus } from '@/api/order-admin'
-import { money, shortDate, errorText } from '@/lib/format'
+import { listOrders, setOrderStatus, ordersStreamUrl } from '@/api/order-admin'
+import { money, lineTotal, shortDate, errorText } from '@/lib/format'
 import type { AdminOrder, OrderStatus } from '@/api/types'
 
 const STATUS_LABEL: Record<string, string> = {
@@ -38,11 +37,12 @@ function mergeOrder (list: AdminOrder[], order: AdminOrder): AdminOrder[] {
 }
 
 /**
- * The owner's live order queue (CLAUDE.md §10 `/manage/orders`). New orders arrive over an SSE
- * stream (OrderAdminApi with Accept: text/event-stream), with a 15-second poll taking over once the
- * stream drops — or from the start where `EventSource` does not exist, which is true under the
- * page-boot probe's jsdom. `admin: true` in src/routes.ts already gates this page; it never checks
- * role itself.
+ * The owner's live order queue (CLAUDE.md §10 `/manage/orders`). An SSE stream (OrderAdminApi with
+ * Accept: text/event-stream) is an accelerator only — any message just triggers a re-read of the
+ * list, never a parse of its own payload — and an unconditional 15-second poll is the floor the
+ * `view-new-orders` story depends on, running from mount whether or not the stream stays open or
+ * exists at all (`EventSource` is absent under the page-boot probe's jsdom). `admin: true` in
+ * src/routes.ts already gates this page; it never checks role itself.
  */
 export default function Orders () {
   const [orders, setOrders] = useState<AdminOrder[]>([])
@@ -65,31 +65,31 @@ export default function Orders () {
     let es: EventSource | null = null
     let pollId: ReturnType<typeof setInterval> | null = null
     let stopped = false
+    let refreshing = false
 
-    function startPolling () {
-      if (pollId || stopped) return
-      pollId = setInterval(() => {
-        listOrders('active')
-          .then((r) => { if (!stopped) setOrders(r?.orders ?? []) })
-          .catch(() => { /* a dropped poll just waits for the next tick */ })
-      }, 15000)
+    // The stream is an ACCELERATOR, never a data source: Harper's subscription envelope is not an
+    // adminOrderView (no id, no queue), so a message only ever tells us to re-read the authoritative
+    // list — never parsed itself. The 15s poll is the floor the story depends on and runs
+    // unconditionally from mount, whether or not the stream stays open: a stream that merely delivers
+    // payloads we cannot use (no onerror ever fires) must not leave the queue un-refreshed forever.
+    function refresh () {
+      if (stopped || refreshing) return
+      refreshing = true
+      listOrders('active')
+        .then((r) => { if (!stopped) setOrders(r?.orders ?? []) })
+        .catch(() => { /* a dropped refresh just waits for the next tick or message */ })
+        .finally(() => { refreshing = false })
     }
 
+    pollId = setInterval(refresh, 15000)
+
     if (typeof EventSource !== 'undefined') {
-      es = new EventSource(`${BASE}/OrderAdminApi?queue=active`, { withCredentials: true })
-      es.onmessage = (event) => {
-        try {
-          const order = JSON.parse(event.data) as AdminOrder
-          setOrders((prev) => mergeOrder(prev, order))
-        } catch { /* a malformed message is skipped, not fatal */ }
-      }
+      es = new EventSource(ordersStreamUrl('active'), { withCredentials: true })
+      es.onmessage = () => { refresh() }
       es.onerror = () => {
         es?.close()
         es = null
-        startPolling()
       }
-    } else {
-      startPolling()
     }
 
     return () => {
@@ -155,7 +155,7 @@ export default function Orders () {
                 {order.items.map((line, i) => (
                   <li key={i} className="flex items-center justify-between gap-2">
                     <span className="min-w-0 truncate">{line.name} × {line.quantity}</span>
-                    <span className="shrink-0 text-muted-foreground">{money(line.lineTotalCents)}</span>
+                    <span className="shrink-0 text-muted-foreground">{money(lineTotal(line))}</span>
                   </li>
                 ))}
               </ul>
