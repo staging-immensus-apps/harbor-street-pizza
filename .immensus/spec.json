@@ -1,58 +1,58 @@
 {
   "appName": "Pizza Shop Online Ordering",
-  "summary": "I'll show pizzas before drinks on the menu and add a short line under the shop name saying you deliver within three miles.",
-  "editClass": "ui_only",
+  "summary": "I'll find and fix the bug that makes adding a new menu item fail with a 'Bad Request' error, so you can build out your menu again.",
+  "editClass": "logic",
   "personas": [
-    {
-      "id": "customer",
-      "label": "Customer",
-      "description": "Browses the menu and orders pizza as a guest."
-    },
     {
       "id": "owner",
       "label": "Shop owner",
-      "description": "Signs in to manage the menu, orders and settings."
+      "description": "Signs in with an emailed link and manages the menu, settings and incoming orders."
     }
   ],
   "stories": [
     {
-      "id": "pizzas-before-drinks",
-      "actor": "customer",
-      "goal": "see the pizza section before the drinks section when browsing the menu",
+      "id": "add-menu-item-works",
+      "actor": "owner",
+      "goal": "Add a new item to the menu from /manage/menu and have it save",
       "acceptance": [
-        "On the home page menu, every pizza item appears above every drink item, regardless of alphabetical order of the category names",
-        "Any other category on the menu keeps its current position relative to the other categories"
+        "Owner fills in a new item's name, description, price and category on /manage/menu and taps Save, and the item appears in the menu list with no error banner",
+        "The new item shows on the public menu once marked available"
       ],
-      "severity": "minor",
-      "area": "frontend"
+      "severity": "blocker",
+      "area": "backend"
     },
     {
-      "id": "delivery-radius-line",
-      "actor": "customer",
-      "goal": "see a short note under the shop name saying delivery is available within three miles",
+      "id": "edit-menu-item-works",
+      "actor": "owner",
+      "goal": "Edit an existing menu item's price or description and have the change save",
       "acceptance": [
-        "A line reading 'We deliver within 3 miles' appears directly under the shop name wherever the shop name is shown to customers"
+        "Owner changes an existing item's price on /manage/menu and taps Save, and the list shows the new price with no error banner"
       ],
-      "severity": "minor",
-      "area": "frontend"
+      "severity": "major",
+      "area": "backend"
     }
   ],
-  "entities": [],
+  "entities": [
+    {
+      "name": "MenuItem",
+      "description": "An existing menu item (name, description, price, category); this fix does not add or change its fields."
+    }
+  ],
   "outOfScope": [
-    "Changing the postcode list or how delivery area is enforced at checkout",
-    "Changing menu item data, prices or categories themselves"
+    "Fixing the separate report that order status buttons (Mark preparing, Mark ready, Cancel) also return a Bad Request error on /manage/orders — not part of this request",
+    "Fixing the separate report that seeded demo orders show £0.00 per line in the order queue",
+    "Fixing the separate report that new orders do not appear on /manage/orders without a page reload",
+    "Changing the 'Estimated ready' wording on the order confirmation page"
   ],
   "questions": [],
   "assumptions": [
-    "The shop name is shown in the site header on every customer-facing page (the frame around the pages); the delivery line is added directly below it there, not only on the home page.",
-    "The exact wording used is 'We deliver within 3 miles'.",
-    "The menu currently lists categories alphabetically. I'll keep each category's items in their existing order, but move the category containing pizzas to the top and the category containing drinks to the bottom; any other categories keep their current relative order in between.",
-    "This is a display change only: no menu item, price or category data is changed, and no new settings are added for the owner to edit the delivery line or category order later."
+    "Earlier testing found that every save on the menu editor (both adding and editing items) fails the same way — a 'Bad Request' error with nothing saved — while shop settings save correctly. This points to one shared fault in how the menu editor's saves are handled, so this fix covers adding new items (what you reported) and editing existing ones (the same fault, found during earlier testing), since fixing only one would leave the other broken.",
+    "Two other write actions — advancing or cancelling an order's status on /manage/orders — were separately found broken with the same kind of error. They are a different screen and are not part of what you asked me to fix here; I've left them out of scope so you can confirm whether you want those fixed next."
   ],
   "riskFlags": [],
   "riskSubjects": [],
   "injectionNoted": [],
-  "sessionId": "d2ef2ddf-6827-46bf-9518-36ffafa44ec1",
-  "costUsd": 0.14312529999999998,
+  "sessionId": "9bf17b41-4e62-4865-916e-29a0085a6979",
+  "costUsd": 0.1803697,
   "overran": null
 }
