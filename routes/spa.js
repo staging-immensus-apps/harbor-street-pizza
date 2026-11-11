@@ -6,20 +6,25 @@
  * only the list. scripts/spa-routes-acceptance.js fails the pull request when it and src/routes.ts
  * disagree.
  *
- * Paths, in the router's own syntax: an exact path, a `:name` segment for one segment, and a
- * trailing `/*` for everything below a prefix — `/x/*` answers `/x` as well as `/x/y`, because the bare
- * path is the one a person types.
+ * `/order/*` is the only wildcard: the confirmation page is `/order/:code`, and a `/x/*` entry
+ * answers the bare `/x` as well (rule 26), so it is listed once.
  *
- * A KIT'S PAGE ROUTES ARE NOT HERE: a kit the platform copies in brings routes/spa.<kit>.json, which
+ * A KIT'S PAGE ROUTES ARE NOT HERE: the sign-in kit brings routes/spa.sign-in.json, which
  * lib/pages.js reads beside this list.
  *
- * A PLAIN LIST AND NOT A FASTIFY PLUGIN. Harper serves only
- * ONE component's `fastifyRoutes` per process and drops the second with one WARN line,
- * and an update to a published app runs two copies of this app in one process — so pages are
- * served by a listener each copy registers for itself, under its own address.
+ * A PLAIN LIST AND NOT A FASTIFY PLUGIN. Harper serves only ONE component's `fastifyRoutes` per
+ * process and drops the second with one WARN line, and an update to a published app runs two copies
+ * of this app in one process.
  *
  * Imports nothing (rule 5).
  */
 export const SPA_ROUTES = [
   '/',
+  '/basket',
+  '/checkout',
+  '/order/*',
+  '/manage',
+  '/manage/orders',
+  '/manage/menu',
+  '/manage/settings',
 ]

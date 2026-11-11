@@ -665,3 +665,7 @@ Every page guards the shape it was handed (`r?.lines ?? []`, `Array.isArray(r?.r
 empty state: the page-boot probe answers `{}` to any GET it has no fixture for, exactly as a
 half-deployed API would.
 
+## 11. Added by kits
+
+- The sign-in kit: screens /login, /auth/verify, /invite, /account, /admin/*; server resources AccountApi, AdminApi, AuthApi, Bootstrap, InboundEmailApi; tables User, MagicLink, EmailLog, EmailSuppression. These came with the kit, so the plan may not list them. <!-- kit:sign-in -->
+- The payments kit: server resources StripeWebhook; tables StripeEvent. These came with the kit, so the plan may not list them. <!-- kit:payments -->

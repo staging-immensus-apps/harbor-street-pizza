@@ -1,0 +1,10 @@
+{
+  "pageProps": {
+    "me": { "authenticated": true, "user": { "id": "u1", "email": "admin@example.test", "name": "Admin", "role": "admin", "createdAt": "2026-06-01T00:00:00.000Z" } }
+  },
+  "fixtures": {
+    "AuthApi/me": { "authenticated": true, "user": { "id": "u1", "email": "admin@example.test", "name": "Admin", "role": "admin", "createdAt": "2026-06-01T00:00:00.000Z" } },
+    "AdminApi/users": { "users": [{ "id": "u1", "email": "admin@example.test", "name": "Admin", "role": "admin", "createdAt": "2026-06-01T00:00:00.000Z" }] },
+    "Bootstrap/": { "needed": true, "mode": "owner" }
+  }
+}

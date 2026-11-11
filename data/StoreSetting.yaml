@@ -1,0 +1,20 @@
+# PREVIEW ONLY. The published app has NO StoreSetting row until the owner saves the settings screen
+# once, and every reader falls back to the built-in defaults until then (lib/shop.js) — so this file
+# must not be moved to data/production/, or an owner's real shop would start with somebody else's
+# postcodes and fee. Exactly one row, id 'store', read by primary key.
+database: data
+table: StoreSetting
+records:
+  - id: store
+    storeName: Forno Vicino
+    acceptingOrders: true
+    pausedMessage: We are closed for the evening. Orders open again at 5pm.
+    pickupEnabled: true
+    deliveryEnabled: true
+    deliveryFeeCents: 400
+    deliveryPostcodes:
+      - N17
+      - N15
+      - N44
+    pickupEstimateMinutes: 25
+    deliveryEstimateMinutes: 45
