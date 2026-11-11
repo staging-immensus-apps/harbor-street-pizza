@@ -7,14 +7,17 @@
 //   POST   /MenuAdminApi/update      { id, ...partial fields } → { item } — THE update route.
 //   POST   /MenuAdminApi/delete      { id } → { ok: true } — THE delete route.
 //
-// The id travels in the body and the path names an action. UNRESOLVED: this shape was adopted on
-// the theory that Harper refuses a write whose path names a record, and THAT THEORY IS WRONG — QA
-// on this build found `POST /MenuAdminApi/update` and `POST /MenuAdminApi/delete`, which carry no
-// record segment, answering 400 exactly as `PATCH /MenuAdminApi/:id` did, including on a save that
-// changed no values. An earlier round had already discarded "the verb is the variable" (PATCH→PUT
-// changed nothing). So the cause of the 400 is NOT KNOWN; see CLAUDE.md §7 "OPEN QUESTION" for the
-// evidence that is missing. The action routes are kept because they are no worse than what they
-// replaced and the page already calls them — not because they are known to be right.
+// The id travels in the body and the path names an action — RESOLVED, and it was never the route
+// shape. `MenuItem.createdAt` and `MenuItem.updatedAt` are `@createdTime` / `@updatedTime`
+// (schema.graphql), so Harper assigns both; a record handed to `put()` that NAMES either one is
+// refused with a bare `400 Bad Request` and no JSON body, which is the unexplained "Bad Request"
+// banner the owner saw on every menu save. `createItem()` used to write `createdAt`/`updatedAt`
+// literals, and `updateItem()` used to spread the stored row — which names `updatedAt` just as
+// surely as a literal does, because the stored row has one. Neither call site names either field
+// now (`lib/managed-fields.js`'s `withoutManaged`), and both re-read the row after the write so the
+// page is shown the timestamps Harper actually assigned. The action routes are kept exactly as they
+// were: the page already calls them, and the record-in-the-path theory this comment used to carry
+// was already falsified before the real cause was found.
 //
 // `PUT /MenuAdminApi/:id`, `PATCH /MenuAdminApi/:id` and `DELETE /MenuAdminApi/:id` are KEPT
 // working exactly as before, as aliases for anything that still reaches them — sharing the same
@@ -35,6 +38,7 @@ import { requireAdmin } from '../lib/auth.js'
 import { json, segmentsOf } from '../lib/http.js'
 import { runAuthed } from '../lib/sign-in-support.js'
 import { sortMenu, adminMenuItem, validateMenuItem } from '../lib/menu.js'
+import { withoutManaged } from '../lib/managed-fields.js'
 
 export class MenuAdminApi extends Resource {
   static loadAsInstance = false
@@ -103,22 +107,32 @@ export class MenuAdminApi extends Resource {
   }
 }
 
-/** The create body, unchanged from before the action-route split. */
+/**
+ * The create body. The record put carries NO `createdAt` and NO `updatedAt` at all — Harper
+ * assigns both (`@createdTime` / `@updatedTime`), and naming either is the 400 this resource used
+ * to produce. The row is re-read after the put so the response carries the timestamps Harper
+ * actually assigned, falling back to the written record only if that re-read somehow comes back
+ * null.
+ */
 async function createItem (body) {
   const fields = validateMenuItem(body, { partial: false })
   if (fields.error) return json({ error: fields.error }, 400)
-  const now = new Date().toISOString()
-  const row = { id: crypto.randomUUID(), ...fields.value, createdAt: now, updatedAt: now }
+  const id = crypto.randomUUID()
+  const row = { id, ...fields.value }
   await db.MenuItem.put(row)
-  return json({ item: adminMenuItem(row) }, 201)
+  const stored = (await db.MenuItem.get(id)) ?? row
+  return json({ item: adminMenuItem(stored) }, 201)
 }
 
 /**
  * The partial-update body shared by the `update` action route and the put()/patch() aliases:
  * same validation, same merge, same response however the id arrived. Semantics stay PARTIAL —
- * the editor dialog sends only the changed fields. `id` and `createdAt` are restated from the
- * stored row rather than trusted from the body, even though validateMenuItem() already drops
- * unknown keys, so a forged id or createdAt in the body changes neither.
+ * the editor dialog sends only the changed fields. `id` is restated from the stored row rather
+ * than trusted from the body, even though validateMenuItem() already drops unknown keys, so a
+ * forged id in the body changes nothing. The stored row is spread through `withoutManaged()`
+ * rather than as-is: spreading the row directly would name `updatedAt` just as surely as a
+ * literal does, because the stored row already carries one, and that was the second of the two
+ * call sites producing the 400. The row is re-read after the put for the same reason as create().
  */
 async function updateItem (id, body) {
   if (!id) return json({ error: 'not found' }, 404)
@@ -126,9 +140,10 @@ async function updateItem (id, body) {
   if (!existing) return json({ error: 'not found' }, 404)
   const fields = validateMenuItem(body, { partial: true })
   if (fields.error) return json({ error: fields.error }, 400)
-  const row = { ...existing, ...fields.value, id: existing.id, createdAt: existing.createdAt, updatedAt: new Date().toISOString() }
+  const row = { ...withoutManaged(existing, 'MenuItem'), ...fields.value, id: existing.id }
   await db.MenuItem.put(row)
-  return json({ item: adminMenuItem(row) })
+  const stored = (await db.MenuItem.get(id)) ?? row
+  return json({ item: adminMenuItem(stored) })
 }
 
 /** Shared by the `delete` action route and the DELETE verb alias. */

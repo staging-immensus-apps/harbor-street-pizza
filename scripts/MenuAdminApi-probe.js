@@ -9,12 +9,17 @@
 // row that snapshot it.
 //
 // THE UPDATE AND DELETE ROUTES ARE POST /MenuAdminApi/update and POST /MenuAdminApi/delete, BODY
-// CARRIES THE id. That shape was adopted on the theory that Harper refuses a write whose path names
-// a record, and QA on this build falsified it: the action routes answer 400 on the deployment too.
-// The cause is unresolved (CLAUDE.md §7 "OPEN QUESTION"), and NOTHING IN THIS FILE SPEAKS TO IT —
-// these assertions run in-process against the stub and pass for either shape. `PUT`/`PATCH`/`DELETE`
-// at `/:id` are kept working as aliases, so every assertion below is driven over both shapes, to
-// hold the body and the merge identical either way.
+// CARRIES THE id — kept exactly as they were; the record-in-the-path theory this file used to carry
+// was already falsified before the real cause was found (see resources/MenuAdminApi.js's header).
+// `PUT`/`PATCH`/`DELETE` at `/:id` are kept working as aliases, so every assertion below is driven
+// over both shapes, to hold the body and the merge identical either way.
+//
+// THE 400 ITSELF IS NOW RESOLVED: Harper refuses any `put()` whose record NAMES a
+// `@createdTime`/`@updatedTime` field (`MenuItem.createdAt`, `MenuItem.updatedAt`). The stub below
+// does not model that refusal — it stores whatever it is handed — so the capture wired in after the
+// seed rows is what stands in for Harper's 400 here: every record the resource actually writes is
+// snapshotted and run through `lib/managed-fields.js`'s `managedFieldsIn()`, which is the verdict a
+// probe can assert without a live cluster.
 //
 // Hermetic: clock frozen, no network, no git.
 
@@ -30,6 +35,7 @@ const { checker } = await import('./probe/harness.js')
 const { tables, resetTables } = await import('./probe/harperdb-stub.js')
 const { call, userWithCookie, transcript, responseRulesVerdict } = await import('./probe/resource-call.js')
 const { MenuAdminApi } = await import('../resources/MenuAdminApi.js')
+const { managedFieldsIn } = await import('../lib/managed-fields.js')
 
 const { check, section, done, failures } = checker('MenuAdminApi-probe')
 
@@ -61,6 +67,18 @@ await tables.MenuItem.put({
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 })
+
+// Every record the resource itself hands to put() from here on, captured at the stub's own
+// method — the same Table instance db.MenuItem.put() reaches (lib/db.js resolves to this very
+// object; every other probe in this tree relies on that identity too). The stub does not refuse
+// a record naming createdAt/updatedAt, so this capture is the only thing standing in for
+// Harper's 400 below.
+const writes = []
+const originalPut = tables.MenuItem.put.bind(tables.MenuItem)
+tables.MenuItem.put = async (record) => {
+  writes.push({ ...record })
+  return originalPut(record)
+}
 
 section('anonymous is refused on every method, and writes nothing')
 {
@@ -252,6 +270,32 @@ section('delete removes the row; a second delete is 404; Order rows are untouche
 
   const orderAfter = tables.Order.rows.get('order-1')
   check('the Order row referencing the deleted item is byte-for-byte unchanged', JSON.stringify(orderAfter) === JSON.stringify(orderBefore))
+}
+
+section('negative control: the managed-field verdict can say no')
+{
+  const synthetic = { id: 'x', name: 'Y', priceCents: 100, createdAt: 123, updatedAt: 456 }
+  const bad = managedFieldsIn(synthetic, 'MenuItem')
+  check('a synthesized record naming createdAt and updatedAt is caught (NEG)', bad.length === 2 && bad.includes('createdAt') && bad.includes('updatedAt'))
+  check('a clean record passes', managedFieldsIn({ id: 'x', name: 'Y' }, 'MenuItem').length === 0)
+}
+
+section('every write this resource made — by create, by the update action route, and by the PUT/PATCH aliases — names no managed field')
+{
+  check(`at least one write was captured (${writes.length})`, writes.length > 0)
+  const offenders = writes.flatMap((w) => managedFieldsIn(w, 'MenuItem').map((f) => `${w.id ?? '?'}:${f}`))
+  check('no captured write names createdAt or updatedAt (this is what Harper\'s 400 was refusing)', offenders.length === 0, offenders.join(', '))
+}
+
+section('editing a row seeded with pre-existing timestamp values still succeeds and changes only the field asked')
+{
+  const before = { ...tables.MenuItem.rows.get('seed-hidden') }
+  const edited = await call(MenuAdminApi, 'POST', 'update', { cookie: ADMIN.cookie, body: { id: 'seed-hidden', priceCents: 1300 } })
+  check('update of a row seeded with pre-existing createdAt/updatedAt -> 200 and the price changed', edited.status === 200 && edited.json?.item?.priceCents === 1300)
+  check('…name, category and available are untouched', edited.json?.item?.name === before.name && edited.json.item.category === before.category && edited.json.item.available === before.available)
+  const stored = tables.MenuItem.rows.get('seed-hidden')
+  check('…and the record that was actually written names no managed field', managedFieldsIn(writes[writes.length - 1], 'MenuItem').length === 0)
+  check('…the stored row still has the id it started with', stored.id === 'seed-hidden')
 }
 
 section(`the rule-20 sweep over every response (${transcript.length})`)

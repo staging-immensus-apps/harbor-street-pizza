@@ -587,30 +587,29 @@ each job. These are the template's, for hazards an app's own code can hit and §
   `process.exit(0)` after the verdict is written.
 **This app's own**
 
-- **OPEN QUESTION, NOT A MEASUREMENT — every admin write 400s on the live deployment and we do not
-  yet know why.** This is written here to stop the next session repeating a guess, and it is
-  deliberately NOT in the hazard shape above: no gate pins it and no cause is established.
-  - *Observed* (QA, evidence tier 1): `PATCH /MenuAdminApi/<id>` and `PUT /OrderAdminApi/<id>`
-    answered `400` with the bare statusText `"Bad Request"`; after the writes were reshaped to
-    `POST /MenuAdminApi/update`, `POST /MenuAdminApi/delete` and `POST /OrderAdminApi/status`,
-    **those answer `400` too**, including a save that changed no values. `PUT /StoreSettingsApi`
-    answered `200` throughout.
-  - *Falsified*: "Harper refuses a write whose path names a record." The action routes carry no
-    record segment and fail identically, so the record path is not the variable. An earlier round
-    had already discarded "the verb is the variable" (PATCH→PUT changed nothing). **Two theories,
-    two fix loops, no reproduction — the pattern is the lesson.** Note also that the `"Bad Request"`
-    banner shows only that no JSON `error` key reached the page; it does NOT locate the refusal in
-    Harper rather than in this app's code, and it was wrong to read it as proof that our handler
-    never ran.
-  - *What is missing before anything is changed again*: one raw failing response captured whole —
-    status, headers and body bytes — with the Harper server log line beside it, and the Harper
-    version it was read at (CLAUDE.md §2 requires the version on any claim about Harper's
-    behaviour; the discarded entry carried none). The narrowest remaining common factor is what QA
-    named: both failing endpoints take an id plus a changed field **in the body**, and the one
-    endpoint that works sends no id at all.
-  - *Why no suite catches it*: `MenuAdminApi-probe` and `OrderAdminApi-probe` drive these same
-    routes in-process and pass. Whatever this is lives above the resource, so a hermetic probe
-    cannot see it and adding another will not help.
+- **A record that NAMES a field Harper assigns is refused `400 Bad Request` with no body** — this
+  was the long-unexplained "Bad Request" on every menu save and every order-status tap, and it is
+  resolved. `MenuItem.createdAt`/`updatedAt` and `Order.updatedAt` carry `@createdTime`/
+  `@updatedTime`, so they are Harper's; a `put()` whose record holds one is refused, and the refusal
+  carries no JSON `error` key, which is why the page could only show the bare statusText. **The trap
+  is the SPREAD, not the literal**: `{ ...existing, status }` names `updatedAt` because the stored
+  row has one, so `OrderAdminApi` hit this without the word appearing anywhere in the file. It also
+  explains the control — `StoreSettingsApi` builds its record from a constant id plus validated
+  fields and answered `200` throughout. *The narrowing that worked was the one QA named*: the two
+  failing endpoints restated a stored row, the working one did not. Two earlier theories (the verb,
+  then the record in the path) were both about the REQUEST and both false; nothing about the
+  request was ever the variable. → cost: two fix loops and a release with no working menu editor →
+  rule: every writer of an owner-stamped table passes its record through `withoutManaged(record,
+  table)` from `lib/managed-fields.js`, and nothing ever sets one of those fields → enforced by:
+  `managedFieldsIn()` asserted over every captured write in `MenuAdminApi-probe` and
+  `OrderAdminApi-probe`, each with a negative control.
+  - *Why no suite caught it for two rounds*: `scripts/probe/harperdb-stub.js` accepts any field,
+    so the probes drove the same routes in-process and passed. A hermetic probe cannot see a
+    refusal the double does not model — so the probes now assert the **shape of the record written**
+    rather than only the response, which is the part a double can be trusted on.
+  - *Consequence for readers*: `createdAt` and `updatedAt` now come back as epoch-millisecond
+    **numbers**, and rows written before the fix may still hold an ISO string, so anything
+    rendering them must accept both.
 - **A `CONFIG.env` in the working tree reds suites that pass in CI**: `lib/config.js` reads that file
   and ignores `process.env` (rule 30), and CI has no such file → move it aside before believing the red.
 - 2026-11-11: **Signed in as admin (owner@example.com via password) on /manage/orders. Placed two new orders from separate anonymous customer sessions while the owner's orders page stayed open with no navigation. The page made polling GET /OrderAdminApi?queue=active requests (200 responses) after each new order was placed, but the new order never appeared in the rendered list across multiple poll cycles over well more than 15 seconds. Reloading /manage/orders immediately showed both new orders at the top of the queue with correct items, pickup/delivery choice and payment status -- so the backend data and first-load rendering are correct, but the 'arrives without reloading' behaviour the story requires does not work.** → cost: one more pass over frontend → rule: frontend must keep "view-new-orders" working → enforced by: story view-new-orders in the next test run <!-- gotcha:qa0-view-new-orders -->
