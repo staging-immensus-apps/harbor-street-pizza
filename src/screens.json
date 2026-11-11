@@ -1,0 +1,10 @@
+{
+  "/": ["browse-menu"],
+  "/basket": [],
+  "/checkout": ["choose-pickup-or-delivery", "pay-online"],
+  "/order/:code": ["order-confirmation"],
+  "/manage": [],
+  "/manage/orders": ["view-new-orders", "update-order-status"],
+  "/manage/menu": ["update-menu"],
+  "/manage/settings": []
+}

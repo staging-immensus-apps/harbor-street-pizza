@@ -1,0 +1,106 @@
+{
+  "routes": [
+    {
+      "path": "/",
+      "name": "Menu",
+      "purpose": "The shop front: the whole menu by category, with a running basket. The first thing a customer sees on their phone.",
+      "stories": [
+        "browse-menu"
+      ],
+      "calls": [
+        "GET /MenuApi",
+        "GET /StoreInfoApi"
+      ],
+      "admin": false
+    },
+    {
+      "path": "/basket",
+      "name": "Basket",
+      "purpose": "Review what is in the basket, change quantities, remove a line, see the running total. One job per screen, thumb-sized controls.",
+      "stories": [],
+      "calls": [
+        "GET /StoreInfoApi",
+        "POST /CheckoutApi/quote"
+      ],
+      "admin": false
+    },
+    {
+      "path": "/checkout",
+      "name": "Checkout",
+      "purpose": "Pickup or delivery, then the details that choice needs: name and phone for both, address and postcode for delivery only. Shows the delivery fee and the final total, then places the order — sending the customer to card payment when Stripe is connected.",
+      "stories": [
+        "choose-pickup-or-delivery",
+        "pay-online"
+      ],
+      "calls": [
+        "GET /StoreInfoApi",
+        "POST /CheckoutApi/quote",
+        "POST /CheckoutApi/order"
+      ],
+      "admin": false
+    },
+    {
+      "path": "/order/:code",
+      "name": "Order confirmation",
+      "purpose": "Confirmation after checkout: order number, what was ordered, the total, pickup or delivery, payment state and the estimated ready time. The same link shows the live status as the kitchen moves it along.",
+      "stories": [
+        "order-confirmation"
+      ],
+      "calls": [
+        "GET /OrderConfirmationApi/:code"
+      ],
+      "admin": false
+    },
+    {
+      "path": "/manage",
+      "name": "Your shop",
+      "purpose": "The owner's hub: how many orders are waiting right now, and a link to each of the three management screens.",
+      "stories": [],
+      "calls": [
+        "GET /OrderAdminApi"
+      ],
+      "admin": true
+    },
+    {
+      "path": "/manage/orders",
+      "name": "Orders",
+      "purpose": "The live order queue. A new paid order appears at the top on its own, with its items, pickup or delivery, the customer's name and phone, the address for delivery, and payment state. One tap moves an order from received to preparing to ready, and another closes it.",
+      "stories": [
+        "view-new-orders",
+        "update-order-status"
+      ],
+      "calls": [
+        "GET /OrderAdminApi",
+        "GET /OrderAdminApi/:id",
+        "PATCH /OrderAdminApi/:id"
+      ],
+      "admin": true
+    },
+    {
+      "path": "/manage/menu",
+      "name": "Menu editor",
+      "purpose": "Add an item, change a name, description or price, hide something that has sold out, or remove it for good. A change shows on the customer menu straight away.",
+      "stories": [
+        "update-menu"
+      ],
+      "calls": [
+        "GET /MenuAdminApi",
+        "POST /MenuAdminApi",
+        "PATCH /MenuAdminApi/:id",
+        "DELETE /MenuAdminApi/:id"
+      ],
+      "admin": true
+    },
+    {
+      "path": "/manage/settings",
+      "name": "Shop settings",
+      "purpose": "Pause and resume ordering, turn pickup and delivery on or off, set the delivery fee, keep the list of postcodes you deliver to, and set the pickup and delivery time estimates. Also shows when customer details were last cleared.",
+      "stories": [],
+      "calls": [
+        "GET /StoreSettingsApi",
+        "PUT /StoreSettingsApi"
+      ],
+      "admin": true
+    }
+  ]
+}

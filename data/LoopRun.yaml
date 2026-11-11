@@ -1,0 +1,23 @@
+# PREVIEW ONLY — two finished runs of the retention sweep, so /manage/settings has a last-cleared
+# date to show before the scheduler has ever ticked in a preview. The ids are the sweep's own
+# deterministic claim keys (lib/retention.js): `clear-personal-details:YYYY-MM-DD`, which is what
+# stops a second tick on the same day doing the work twice.
+database: data
+table: LoopRun
+records:
+  - id: clear-personal-details:2026-11-10
+    loop: clear-personal-details
+    startedAt: '2026-11-10T02:00:00.000Z'
+    finishedAt: '2026-11-10T02:00:01.420Z'
+    outcome: ok
+    notes: cleared 0 order(s) placed before 2025-11-10T02:00:00.000Z
+    triggeredBy: schedule
+    node: preview
+  - id: clear-personal-details:2026-11-11
+    loop: clear-personal-details
+    startedAt: '2026-11-11T02:00:00.000Z'
+    finishedAt: '2026-11-11T02:00:02.880Z'
+    outcome: ok
+    notes: cleared 1 order(s) placed before 2025-11-11T02:00:00.000Z
+    triggeredBy: schedule
+    node: preview

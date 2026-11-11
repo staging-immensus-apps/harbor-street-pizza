@@ -1,0 +1,64 @@
+# The sign-in kit's tables. The platform copies this file in with the rest of the
+# kit when a plan says people sign in, and config.yaml's `schema*.graphql` loads it beside the app's own
+# schema.graphql. NO export directive (rule 18); `@indexed` on anything sorted or filtered (rule 6);
+# short-lived tokens on @table(expiration:) tables keyed by the token HASH (rule 10).
+#
+# THE APP MUST NOT DECLARE THESE TABLES AGAIN in its own schema.graphql: Harper reads each schema file on
+# its own, and a table declared in two files is not merged — the one read last replaces the other's
+# attributes whole (measured on harper@5.3.1, 2026-10-16). Add a column here instead.
+
+type User @table {
+  id: ID @primaryKey
+  email: String @indexed
+  name: String
+  # App-level role, not a Harper role: 'admin' | 'member' (the builder may add more).
+  role: String @indexed
+  # PBKDF2 "salt:hash" — only an admin ever has one (AuthApi/password).
+  passwordHash: String
+  googleSub: String @indexed
+  # Epoch ms of recent magic-link sends; the per-user rate limit reads it (lib/auth.js).
+  magicLinkSendTimestamps: [Long]
+  # Epoch ms of recent failed password attempts; the fixed-window lockout reads it (lib/auth.js).
+  passwordAttemptTimestamps: [Long]
+  deactivatedAt: String
+  lastLoginAt: String
+  createdAt: String @indexed
+  updatedAt: String
+}
+
+# id = sha256(token). The table expires the row; nothing else has to remember to.
+type MagicLink @table(expiration: 900) {
+  id: ID @primaryKey
+  userId: String @indexed
+  email: String
+  purpose: String
+  createdAt: String
+}
+
+type EmailLog @table {
+  id: ID @primaryKey
+  to: String @indexed
+  subject: String
+  template: String @indexed
+  # sent | skipped | suppressed | failed
+  status: String @indexed
+  providerId: String
+  error: String
+  sentAt: String @indexed
+}
+
+# id = the normalized address. One-way: see lib/email.js recordDeliveryEvent().
+type EmailSuppression @table {
+  id: ID @primaryKey
+  email: String @indexed
+  # hard_bounce | complaint, or null while only soft bounces have been seen
+  reason: String @indexed
+  suppressedAt: String
+  firstSeenAt: String
+  lastEventAt: String
+  bounceType: String
+  bounceSubType: String
+  detail: String
+  softBounceCount: Int
+  source: String
+}

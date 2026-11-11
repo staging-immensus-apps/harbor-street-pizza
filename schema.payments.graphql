@@ -1,0 +1,21 @@
+# The payments kit's table. The platform copies this file in with the rest of the
+# kit when a plan calls api.stripe.com, and config.yaml's `schema*.graphql` loads it beside the app's own
+# schema.graphql. The app must not declare this table again in its own schema (see schema.sign-in.graphql).
+
+# Idempotency ledger for the Stripe events Stripe posts to this app (resources/StripeWebhook.js),
+# 30 days. Stripe retries a delivery on purpose, so the row keyed by its event id is what stops a
+# membership being created twice.
+#
+# A ROW MEANS THE EVENT WAS DEALT WITH, and the two outcomes are the two ways that happens: the
+# app's handler applied it, or the app's handler looked at it and declined it. Every other outcome
+# is a REFUSAL and writes no row, so that Stripe keeps the event and retries — an unverifiable
+# body, a handler that threw, and an app with no handler at all, which used to be
+# acked and recorded `unhandled`. There was a `note` column for that last case and it had no other
+# writer, so it went with it rather than becoming residue a later session builds against.
+type StripeEvent @table(expiration: 2592000) {
+  id: ID @primaryKey
+  type: String @indexed
+  receivedAt: String @indexed
+  # applied | ignored
+  outcome: String
+}

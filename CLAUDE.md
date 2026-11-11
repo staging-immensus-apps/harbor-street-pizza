@@ -1,91 +1,32 @@
-# CLAUDE.md — app-template
-
-**Read this at the start of every session before you touch anything.** It is the
-canonical brief. If something here contradicts what you assume, this doc wins — the
-codebase changes faster than any one session's memory. Multiple sessions (the builder's
-agent stages, Claude Code sessions, and on the Builder tier humans) coordinate through
-GitHub (branch → PR → check → merge, see §5) and this file.
-
-**GROUND IN HARPER SOURCE AND DO NOT REBUILD HARPER PRIMITIVES.** (Stephen, 2026-10-06.) Before
-building any mechanism, read Harper's own source, types and docs for it. A claim about Harper's
-behaviour carries **the version it was measured against and the date**. **Always check what
-version of Harper you are running on and read the Harper docs accordingly** — a version bump is what
-prompts the re-check, and nothing else will connect the two. The control plane spent weeks
-on a hand-built coordination layer because `lib/jobs.js` asserted *"Harper has no application-level
-compare-and-swap"*: true at the version we run (`5.2.13`), and `Table.lock()` landed in **5.3**.
-`immensus/CLAUDE.md` §0 is the re-architecture list; `immensus-control#144` is the first item.
-
-**THIS FILE IS SHORT ON PURPOSE, AND THE TEMPLATE'S OWN RECORD IS ELSEWHERE** (#101). Every model stage
-of every build receives an app's whole `CLAUDE.md` in its system prompt, and §2–§7 reach every app as
-they stand here, so only what an app needs goes in them. **If you are working on this template itself,
-read `kits/TEMPLATE-HISTORY.md` before you change a gate, a seeded suite or a workflow**: it holds the
-incident record, the cross-repository rulings and the mechanism history. An incident in this repository gets its entry
-there, in the same PR as its gate and suite, and one short line in §4 or §7 only if an app's own code can
-break the rule. `template-manifest --check` holds this file under a ceiling. That record is not copied
-into apps, and the builder replaces this preamble and §1 in every app, so this paragraph never reaches one
-(`mergeClaudeMd` in `immensus-builder`'s `lib/stages/claude-md.js`, driven at `cfcdae6` on 2026-11-05).
+# CLAUDE.md — Pizza Shop Online Ordering
 
 ## 1. Product
 
-This repo is the template every Immensus-generated customer app starts from: the control
-plane creates `immensus-apps/<slug>` from `ImmensusApp/web-app-template`, and the builder (a
-headless Agent SDK pipeline, `ImmensusApp/immensus-builder`) writes the app into it. Its
-users are three: the builder's agent stages, which are the primary session in every
-generated repo; Claude sessions working on the template itself; and, on the Builder tier
-only, human collaborators in a generated repo. What matters: everything here is inherited
-by every app, so a rule that is wrong here is wrong everywhere, and every incident anywhere
-(QA regression, founder complaint, reviewer catch) lands here as rule + gate + hermetic
-fixture in one PR (DESIGN.md §4.9, `PROMPTS.md` §2).
+A phone-first ordering site for one pizza shop. Customers browse the menu, build a basket, choose
+pickup or delivery, give a name and phone number (and an address for delivery), and check out as a
+guest — there are no customer accounts. The shop owner signs in with a link emailed to them and gets
+three screens: a live order queue, a menu editor and shop settings.
 
-**THE TEMPLATE IS BARE BONES, AND SIGN-IN AND PAYMENTS ARE KITS** (Stephen, 2026-10-16, #88: *"Strip the
-template down to bare bones. This is causing more problems then helping."*, then **"Reviewed kit"**). A fresh web
-app starts with one page, its frame, the build stamp, the look machinery and the scheduler — nothing about
-accounts, members, admin, invites, magic links, mail or payments. When a plan says people sign in, or calls
-api.stripe.com, the platform copies the matching KIT from `kits/` into the app before its Backend runs
-(`immensus-builder/lib/kits.js`): one reviewed copy of that code, never a model's re-derivation of it. A kit only
-ever adds files, so the core finds a kit's pieces by where they sit — `schema*.graphql`, `routes/spa.<kit>.json`,
-`src/extensions/<kit>.tsx`, `src/pages/**` — and a kit's `package.json` is merged into the app's. §6 says how
-CI tests the core alone and each kit with it; `kits/TEMPLATE-HISTORY.md` carries the design.
+Decided with the owner before the build, and load-bearing:
 
-FIVE kinds of file, and the first one is a statement of ORIGIN rather than a permission.
-**SEEDED** files are the ones this template ships verbatim into every app; `.immensus/template.json`
-records the git blob sha of each, and `template-manifest --check` is what holds the record to the
-list — so **count it, never quote it**: `node scripts/template-manifest.js --check` prints the number.
-**GENERATED** files are the app. **BUILT** files (`web/`) are produced by `vite build` before every
-deploy and never committed. And **HARNESS** files — `scripts/run-suites.js` and the nine
-`scripts/probe/*.js` — live here and are **not seeded at all**: they are the platform's instrument,
-not the app's artefact (#51; the next paragraph). And **KIT** files — everything under
-`kits/` — are not seeded either: they reach an app only when its plan needs them, copied by the platform to the
-path they occupy in an app (#88).
+- **Guest checkout.** No customer accounts, no order history, no password. The only person who signs
+  in is the owner, by emailed link, and only invited addresses can get an account at all
+  (`accessModel.signUp: "invited"`). There are no staff logins in this version.
+- **Fixed menu.** No sizes, crusts or toppings to choose. An item is a name, a description, a price
+  and a category.
+- **ASAP only.** No scheduling an order for later.
+- **Menu prices are final.** No tax line anywhere; the total is the lines plus the delivery fee.
+- **Delivery by postcode list.** The owner keeps a list of postcodes. A delivery address whose
+  postcode is not on the list is refused at checkout with an offer of pickup instead.
+- **One flat delivery fee**, set by the owner, added to every delivery order.
+- **Payment through the owner's own Stripe account.** Until that key is in place, checkout places the
+  order with `paymentStatus: 'pay_at_store'`. Once it is there, checkout creates a Stripe Checkout
+  Session and the order only joins the owner's queue when the payments kit's `StripeWebhook`
+  confirms payment. Both paths must keep working — never assume the key is present.
+- **Twelve-month retention.** Name, phone and delivery address are cleared from an order twelve
+  months after it was placed. The order, its lines and its totals are kept for good.
 
-**The harness is ours and is not the app's at all** (#51): an app's tree holds its own suites and not
-the instrument that executes them. The ten files stay here because this repository's `pr-check.yml` runs
-the runner, `immensus-control`'s seed withholds them from every app's root commit, and the platform copies
-them into each build workspace. No product file may depend on them (`deps-acceptance`).
-
-**A seeded file is the app's to change** (immensus/DESIGN.md §3.1a): once an app begins to build it is its
-own independent thing and fully modifiable. What is left here is **provenance**
-(`scripts/template-manifest.js`, and `npm run template-manifest -- --diff` reads it back), plus one check
-that belongs to THIS repository only: the manifest must match the tree in the PR that changes it, run by
-`pr-check.yml` under `if: github.repository == …` so it can never reach an app.
-
-So "SEEDED" still earns its place in the table below: it says which files arrived from here, which
-is what decides whether a fix belongs in an issue on this repo (so every app gets it) or in the one
-app in front of you. It no longer says you may not touch them.
-
-Never, with the reason:
-- No platform runtime library between the app and Harper — apps are pure Harper
-  applications; a kit would be a second thing to version and a second thing to sandbox.
-- No deploy trees, template overlays, or per-target rewriting — the repo root IS the
-  deployable (`harper deploy`); overlays existed only to work around a Harper bug.
-- No secrets in the repo, ever — `CONFIG.env` / `.env` are written at deploy time by the
-  worker; pr-check scans for key material and fails the PR.
-- No calendar estimates in plans, issues, or PR bodies — order by dependency, define
-  done by exit criteria.
-- Every rule this class of app enforces is a row rule in `resources/`, because Harper's RBAC is
-  table-level and cannot express one. (`@export` was prohibited here until 2026-11-02 —
-  `ImmensusApp/immensus#143` withdrew that rule; adding the directive still adds no rule, so a row
-  rule in `resources/` is what answers for a row either way.)
+Form factor: phone. One thing per screen, big tap targets, no side-by-side panes. Look: `studio`.
 
 ## 2. Stack
 
@@ -631,5 +572,152 @@ each job. These are the template's, for hazards an app's own code can hit and §
   verifier sharing one function prove only that they agree.
 - **A jsdom child never exits on its own**: its timers keep the event loop alive until the kill →
   `process.exit(0)` after the verdict is written.
+**This app's own**
+
+- **OPEN QUESTION, NOT A MEASUREMENT — every admin write 400s on the live deployment and we do not
+  yet know why.** This is written here to stop the next session repeating a guess, and it is
+  deliberately NOT in the hazard shape above: no gate pins it and no cause is established.
+  - *Observed* (QA, evidence tier 1): `PATCH /MenuAdminApi/<id>` and `PUT /OrderAdminApi/<id>`
+    answered `400` with the bare statusText `"Bad Request"`; after the writes were reshaped to
+    `POST /MenuAdminApi/update`, `POST /MenuAdminApi/delete` and `POST /OrderAdminApi/status`,
+    **those answer `400` too**, including a save that changed no values. `PUT /StoreSettingsApi`
+    answered `200` throughout.
+  - *Falsified*: "Harper refuses a write whose path names a record." The action routes carry no
+    record segment and fail identically, so the record path is not the variable. An earlier round
+    had already discarded "the verb is the variable" (PATCH→PUT changed nothing). **Two theories,
+    two fix loops, no reproduction — the pattern is the lesson.** Note also that the `"Bad Request"`
+    banner shows only that no JSON `error` key reached the page; it does NOT locate the refusal in
+    Harper rather than in this app's code, and it was wrong to read it as proof that our handler
+    never ran.
+  - *What is missing before anything is changed again*: one raw failing response captured whole —
+    status, headers and body bytes — with the Harper server log line beside it, and the Harper
+    version it was read at (CLAUDE.md §2 requires the version on any claim about Harper's
+    behaviour; the discarded entry carried none). The narrowest remaining common factor is what QA
+    named: both failing endpoints take an id plus a changed field **in the body**, and the one
+    endpoint that works sends no id at all.
+  - *Why no suite catches it*: `MenuAdminApi-probe` and `OrderAdminApi-probe` drive these same
+    routes in-process and pass. Whatever this is lives above the resource, so a hermetic probe
+    cannot see it and adding another will not help.
 - **A `CONFIG.env` in the working tree reds suites that pass in CI**: `lib/config.js` reads that file
   and ignores `process.env` (rule 30), and CI has no such file → move it aside before believing the red.
+- 2026-11-11: **Signed in as admin (owner@example.com via password) on /manage/orders. Placed two new orders from separate anonymous customer sessions while the owner's orders page stayed open with no navigation. The page made polling GET /OrderAdminApi?queue=active requests (200 responses) after each new order was placed, but the new order never appeared in the rendered list across multiple poll cycles over well more than 15 seconds. Reloading /manage/orders immediately showed both new orders at the top of the queue with correct items, pickup/delivery choice and payment status -- so the backend data and first-load rendering are correct, but the 'arrives without reloading' behaviour the story requires does not work.** → cost: one more pass over frontend → rule: frontend must keep "view-new-orders" working → enforced by: story view-new-orders in the next test run <!-- gotcha:qa0-view-new-orders -->
+- 2026-11-11: **Signed in as admin (owner@example.com, password). On /manage/menu, clicked Edit on 'Cola' and changed its price from £2.00 to £2.25, then Save. PATCH /MenuAdminApi/menu-cola returned 400 Bad Request and the dialog showed a 'Bad Request' error banner; the list still showed Cola at £2.00 afterward, confirming the edit was not saved.** → cost: one more pass over backend → rule: backend must keep "update-menu" working → enforced by: story update-menu in the next test run <!-- gotcha:qa0-update-menu -->
+- 2026-11-11: **Signed in as admin (owner@example.com, password). On /manage/orders, clicking 'Mark preparing' on a Received order (own order #sFUI3AL8, id 05258a5a-c5cc-4e23-9657-d0e1887729ce) returned PATCH /OrderAdminApi/<id> 400 and the page showed a 'Bad Request' error banner; the order stayed 'Received'. Clicking 'Mark ready' on a different order (order-0002, #Vb3Nm6Xs) also returned 400. Reproduced on two different orders, so the status-update action is broken, not an isolated data issue.** → cost: one more pass over backend → rule: backend must keep "update-order-status" working → enforced by: story update-order-status in the next test run <!-- gotcha:qa0-update-order-status -->
+- 2026-11-11: **Seeded demo orders (e.g. #Hs7Qk2mV, #Zq8Wd1nY, #Vb3Nm6Xs, #Ck9Tf2Rb) show £0.00 for every individual line item in the owner's order queue (e.g. 'Margherita × 2  £0.00', 'Pepperoni × 3  £0.00') even though the order total is correct. Only orders freshly created during this walk showed correct per-line prices. This is a display bug affecting how snapshot item prices are rendered/read for at least the seeded data on /manage/orders.** → cost: one more pass over frontend → rule: frontend must keep "Seeded demo orders (e.g. #Hs7Qk2mV, #Zq8Wd1nY, #Vb3Nm6Xs, #Ck9Tf2Rb) show £0.00 for every individual line item in the owner's order queue (e.g. 'Margherita × 2  £0.00', 'Pepperoni × 3  £0.00') even though the order total is correct. Only orders freshly created during this walk showed correct per-line prices. This is a display bug affecting how snapshot item prices are rendered/read for at least the seeded data on /manage/orders." working → enforced by: the next test run <!-- gotcha:qa0-Seeded-demo-orders-e-g-Hs7Qk2mV-Zq8Wd1nY -->
+- 2026-11-11: **On the order confirmation page (/order/:code), the 'Estimated ready' field shows only a calendar date (e.g. 'Nov 11, 2026') with no time of day, which is uninformative for same-day ASAP orders; the checkout page shows a more useful relative estimate ('around 25 min').** → cost: one more pass over frontend → rule: frontend must keep "On the order confirmation page (/order/:code), the 'Estimated ready' field shows only a calendar date (e.g. 'Nov 11, 2026') with no time of day, which is uninformative for same-day ASAP orders; the checkout page shows a more useful relative estimate ('around 25 min')." working → enforced by: the next test run <!-- gotcha:qa0-On-the-order-confirmation-page-order-cod -->
+- 2026-11-11: **Signed in as admin (owner@example.com), opened /manage/menu, clicked Edit on 'Cola', changed price to £2.10 and Save: page showed 'Bad Request' and network showed PATCH /preview/MenuAdminApi/menu-cola 400 — price unchanged in the list. Retried changing only the description with the same result (PATCH 400 again). The owner cannot save any menu item edit. (For contrast, StoreSettingsApi PUT with an edited field succeeded with 200, so this is specific to MenuAdminApi, not a general auth problem.)** → cost: one more pass over backend → rule: backend must keep "update-menu" working → enforced by: story update-menu in the next test run <!-- gotcha:qa1-update-menu -->
+- 2026-11-11: **Signed in as admin (owner@example.com), on /manage/orders. Clicking 'Mark preparing' on any Received order returns a 'Bad Request' banner on the page and the underlying call fails: PUT /preview/OrderAdminApi/<id> 400. Reproduced on three different orders (ids c548b224-d5c1-4566-81d7-be61efcc10fd and order-0002) for 'Mark preparing', 'Mark ready' and 'Cancel order' actions — every status-changing PUT to OrderAdminApi returned 400 and no order's status changed on reload. The owner cannot currently advance or cancel any order.** → cost: one more pass over backend → rule: backend must keep "update-order-status" working → enforced by: story update-order-status in the next test run <!-- gotcha:qa1-update-order-status -->
+- 2026-11-11: **resources/MenuAdminApi.js: Every PATCH to MenuAdminApi (menu item edits) returns 400 Bad Request regardless of which field changes (price or description), on the live /preview deployment. Blocks the owner from editing any menu item.** → cost: one more pass over backend → rule: backend must keep "resources/MenuAdminApi.js: Every PATCH to MenuAdminApi (menu item edits) returns 400 Bad Request regardless of which field changes (price or description), on the live /preview deployment. Blocks the owner from editing any menu item." working → enforced by: the next test run <!-- gotcha:qa1-resources-MenuAdminApi-js-Every-PATCH-to -->
+- 2026-11-11: **resources/OrderAdminApi.js: Every status-changing PUT to OrderAdminApi (Mark preparing, Mark ready, Cancel order) returns 400 Bad Request on the live /preview deployment across multiple distinct orders. Blocks the owner from advancing or cancelling any order.** → cost: one more pass over backend → rule: backend must keep "resources/OrderAdminApi.js: Every status-changing PUT to OrderAdminApi (Mark preparing, Mark ready, Cancel order) returns 400 Bad Request on the live /preview deployment across multiple distinct orders. Blocks the owner from advancing or cancelling any order." working → enforced by: the next test run <!-- gotcha:qa1-resources-OrderAdminApi-js-Every-status- -->
+
+## 8. Data model
+
+Four tables in `schema.graphql`. `User`, `MagicLink`, `EmailLog` and `EmailSuppression` come from the
+sign-in kit and `StripeEvent` from the payments kit, each in its own `schema.*.graphql` — never
+redeclare one, and never `@relationship` across files.
+
+- **`MenuItem`** — one row per menu item. `priceCents` is a whole-cent `Int`; no floats anywhere in
+  money. `category`, `available` and `sortOrder` are indexed because the menu is read as
+  `available == true` sorted by `category` then `sortOrder` — a list page sorting on an unindexed
+  field with no filter beside it is a 404, not a slow query.
+- **`Order`** — one row per order, `@table(audit: true)`. The audit store is not decoration: the
+  owner's queue subscribes to this table for live arrivals, and `Table.subscribe()` refuses a table
+  without one (it would otherwise perform that schema write itself at the first subscribe).
+  - `items` is a `[Any]` **snapshot** — `{menuItemId, name, priceCents, quantity}` per line, copied
+    from `MenuItem` at checkout. A later price change or a deleted item must never alter an order
+    that has already been placed, so nothing reads prices back through `menuItemId`.
+  - `code` is 32 random URL-safe characters and is the only key the confirmation page uses. It is
+    indexed; it is never derived from anything guessable.
+  - `queue` is `pending_payment` | `active` | `done` and exists so the owner's list is one indexed
+    equality plus an indexed sort rather than a scan or a `not_equal`. `status` is
+    `awaiting_payment` | `received` | `preparing` | `ready` | `collected` | `cancelled`.
+  - `paymentStatus` is `unpaid` | `paid` | `pay_at_store`; `paymentRef` holds the Stripe Checkout
+    Session id and is indexed so the webhook finds the order.
+  - `personalDetailsClearedAt` is null until the retention sweep clears the row's name, phone,
+    address and postcode; indexed, because the sweep filters on it.
+- **`StoreSetting`** — exactly one row, id `store`, read by primary key. Every reader falls back to
+  built-in defaults when it is absent (pickup on, delivery off, 400-cent fee, no postcodes, 25/45
+  minute estimates), so the published app works before the owner has ever saved. `StoreSettingsApi`
+  creates it on first save. No field is indexed: there is one row and it is fetched by id.
+- **`LoopRun`** — the template's. The nightly retention sweep writes one row per occurrence with the
+  **deterministic** id `clear-personal-details:YYYY-MM-DD`, claimed before the work is done. Nothing
+  on Harper makes a scheduled job exactly-once — every worker of every node ticks the timer and
+  leadership is a lease over last-writer-wins — so the deterministic key is what stops a second tick
+  doing the work twice. The sweep itself is idempotent anyway: it clears fields that are already
+  null-safe and skips rows where `personalDetailsClearedAt` is set.
+
+The sweep lives behind `resources/Scheduler.js` (rule 17) as a loop in `lib/loops/`: find orders with
+`placedAt` less than the cutoff (indexed range) and `personalDetailsClearedAt == null` (nulls are
+indexed), clear the four personal fields, stamp the timestamp. It never arms in the preview copy.
+
+## 9. Auth and owner rules
+
+`accessModel`: `signIn: "optional"`, `signUp: "invited"`, `entry: "/"`, `callerAuth: "none"`. The shop
+is open to anyone; signing in is what makes you the owner. The sign-in kit supplies `AuthApi`,
+`AdminApi`, `AccountApi`, `Bootstrap` and `InboundEmailApi` — never write a second sign-in, a second
+session cookie or a second invite flow beside them.
+
+Every resource sets `static loadAsInstance = false` and `target.checkPermission = false` first: this
+app's people are `User` rows, not Harper roles, so the row rule in the resource IS the access control.
+An unauthenticated refusal is a thrown `Response` 403 with `code: 'auth_required'` — never 401.
+
+| Resource | Rule |
+|---|---|
+| `MenuApi` | public, read-only, available items only |
+| `StoreInfoApi` | public, read-only, the shop-level facts a customer needs; nothing private |
+| `CheckoutApi` | public write. **Never trust the basket.** Every line is re-read from `MenuItem` and re-priced server-side; the fee and the postcode rule come from `StoreSetting`; the caller may not set totals, `status`, `queue`, `paymentStatus`, `paymentRef` or `code` |
+| `OrderConfirmationApi` | public, but reachable only by the order's own random `code`. No listing, no enumeration, one order per request |
+| `MenuAdminApi` | admin |
+| `StoreSettingsApi` | admin (reads `LoopRun` for the last-cleared date; never writes it) |
+| `OrderAdminApi` | admin — the only place customer names, phones and addresses are listed |
+
+An admin check is role exactly `admin` on the session's user, on every method including the SSE
+stream: `connect`/`subscribe` runs the same authorization entry as a REST request, so the rule is
+written once in the resource and covers the live stream too.
+
+The webhook is the payments kit's `StripeWebhook` and nothing in this app re-implements it: its
+signature is checked over the raw bytes, it is idempotent on the Stripe event id, and it refuses in
+the preview copy. Its only job here is to set `paymentStatus: 'paid'`, `status: 'received'` and
+`queue: 'active'` on the order whose `paymentRef` matches.
+
+## 10. Pages
+
+Phone-first, `studio` look. Eight routes; `/order/:code` is the only wildcard, so `routes/spa.js`
+carries `/order/*` and `/order` answers too (rule 26).
+
+| Route | Who | What it does |
+|---|---|---|
+| `/` | anyone | The menu by category with a running basket. Entry route. Shows the paused message instead of the basket when ordering is off |
+| `/basket` | anyone | Quantities, removals, running total |
+| `/checkout` | anyone | Pickup or delivery; name and phone always, address and postcode for delivery only. Postcode checked against the delivery list before the order can be placed. Places the order, then sends the customer to Stripe when a key is configured |
+| `/order/:code` | anyone with the link | Confirmation: order number, lines, total, pickup or delivery, payment state, estimated ready time, and the current status |
+| `/manage` | owner | Hub: how many orders are waiting, links to the three screens |
+| `/manage/orders` | owner | The live queue. New orders arrive over the stream with a 15-second poll as the fallback; one tap advances the status |
+| `/manage/menu` | owner | Add, edit, hide and remove items; change prices |
+| `/manage/settings` | owner | Pause ordering, pickup/delivery switches, delivery fee, postcode list, time estimates, last-cleared date |
+
+Every page guards the shape it was handed (`r?.lines ?? []`, `Array.isArray(r?.rows)`) and renders an
+empty state: the page-boot probe answers `{}` to any GET it has no fixture for, exactly as a
+half-deployed API would.
+
+## 11. Added by kits
+
+- The sign-in kit: screens /login, /auth/verify, /invite, /account, /admin/*; server resources AccountApi, AdminApi, AuthApi, Bootstrap, InboundEmailApi; tables User, MagicLink, EmailLog, EmailSuppression. These came with the kit, so the plan may not list them. <!-- kit:sign-in -->
+- The payments kit: server resources StripeWebhook; tables StripeEvent. These came with the kit, so the plan may not list them. <!-- kit:payments -->
+
+## 12. Decisions
+
+- 2026-11-11: **First, what sort of thing are we building? I think it is "something people open and use" — Customers browse your menu and order pizza on pages they visit, while you manage prices and orders on the same site. Tell me if that is not right; it changes everything that comes after.** → Something people open and use <!-- decision:app_kind -->
+- 2026-11-11: **You said delivery should be limited to an area you set. How should the app decide whether an address is inside it?** → A list of postcodes I keep <!-- decision:architect:delivery_area_rule -->
+- 2026-11-11: **Should delivery orders cost extra?** → A delivery fee I set <!-- decision:architect:delivery_fee -->
+- 2026-11-11: **Each order keeps the customer's name, phone number and, for delivery, their address. How long should the app hold on to that?** → Twelve months, then clear the personal details <!-- decision:architect:keep_orders -->
+- 2026-11-11: **Customers order without making an account, but you need a login for the menu and order screens. How would you like to get in?** → A link emailed to me <!-- decision:architect:owner_sign_in -->
+- 2026-11-11: **When a customer checks out, should the total be exactly the menu prices added up, or should the app add tax on top?** → Menu prices are the final price <!-- decision:architect:tax_on_prices -->
+- 2026-11-11: **Should delivery be limited to a certain area, or can anyone enter a delivery address?** → Limit delivery to an area I set <!-- decision:delivery_area -->
+- 2026-11-11: **Where will people mostly use this — on a phone, or at a computer? It changes how much I put on one screen and how people get around your app.** → Mostly on a phone <!-- decision:form_factor -->
+- 2026-11-11: **Do customers need to create an account to order, or can they check out as a guest each time?** → Guest checkout, no account needed <!-- decision:guest_checkout -->
+- 2026-11-11: **How should your app look? I'd go with Bloom for this — A pizza shop is a cheerful, everyday treat, and a bright, friendly look suits food photos and a quick order flow. Pick another if you would rather, or choose Something else and describe the look you want; it is easy to change later.** → Studio <!-- decision:look_and_feel -->
+- 2026-11-11: **Should customers be able to customize pizzas (pick size, crust, toppings), or do you just want a fixed list of ready-made items with set prices?** → Fixed menu items only <!-- decision:menu_customization -->
+- 2026-11-11: **Can customers schedule a pickup or delivery for later, or should every order be for as soon as possible?** → As soon as possible only <!-- decision:order_timing -->
+- 2026-11-11: **Taking payments needs your Stripe account. I'll build invite codes now and add checkout when you connect Stripe. Is that right?** → Yes, invite codes for now <!-- decision:payments -->
+- 2026-11-11: **Will anyone besides you need their own login to see and manage incoming orders, like kitchen staff?** → Just me <!-- decision:staff_access -->

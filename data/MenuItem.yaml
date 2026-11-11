@@ -1,0 +1,105 @@
+# PREVIEW ONLY — Harper's dataLoader loads data/*.yaml in the preview copy alone (rule 31); the
+# published app starts with an empty menu and the owner writes it from /manage/menu.
+# An example menu across three categories, with two items marked available: false so the
+# hidden-item case is visible on both the editor and the (public) menu it must stay off.
+database: data
+table: MenuItem
+records:
+  - id: menu-margherita
+    name: Margherita
+    description: San Marzano tomato, fior di latte, basil.
+    priceCents: 950
+    category: Pizzas
+    available: true
+    sortOrder: 10
+  - id: menu-pepperoni
+    name: Pepperoni
+    description: Tomato, mozzarella, a generous layer of pepperoni.
+    priceCents: 1150
+    category: Pizzas
+    available: true
+    sortOrder: 20
+  - id: menu-funghi
+    name: Funghi
+    description: Chestnut mushrooms, garlic, mozzarella, thyme.
+    priceCents: 1150
+    category: Pizzas
+    available: true
+    sortOrder: 30
+  - id: menu-diavola
+    name: Diavola
+    description: Spicy salami, red onion, chilli honey.
+    priceCents: 1250
+    category: Pizzas
+    available: true
+    sortOrder: 40
+  - id: menu-quattro-formaggi
+    name: Quattro Formaggi
+    description: Mozzarella, gorgonzola, pecorino, smoked scamorza.
+    priceCents: 1350
+    category: Pizzas
+    available: true
+    sortOrder: 50
+  - id: menu-truffle-special
+    name: Truffle Special
+    description: Mushroom, truffle cream, rocket. Weekends only.
+    priceCents: 1600
+    category: Pizzas
+    available: false
+    sortOrder: 60
+  - id: menu-garlic-bread
+    name: Garlic Bread
+    description: Pizza dough, garlic butter, parsley.
+    priceCents: 450
+    category: Sides
+    available: true
+    sortOrder: 10
+  - id: menu-garlic-bread-cheese
+    name: Garlic Bread with Cheese
+    description: The same, under melted mozzarella.
+    priceCents: 550
+    category: Sides
+    available: true
+    sortOrder: 20
+  - id: menu-rocket-salad
+    name: Rocket and Parmesan Salad
+    description: Rocket, shaved parmesan, lemon dressing.
+    priceCents: 500
+    category: Sides
+    available: true
+    sortOrder: 30
+  - id: menu-olives
+    name: Marinated Olives
+    description: Gordal olives, orange zest, fennel seed.
+    priceCents: 400
+    category: Sides
+    available: false
+    sortOrder: 40
+  - id: menu-cola
+    name: Cola
+    description: 330ml can.
+    priceCents: 200
+    category: Drinks
+    available: true
+    sortOrder: 10
+  - id: menu-lemonade
+    name: Cloudy Lemonade
+    description: 330ml bottle.
+    priceCents: 250
+    category: Drinks
+    available: true
+    sortOrder: 20
+  - id: menu-sparkling-water
+    name: Sparkling Water
+    description: 500ml bottle.
+    priceCents: 180
+    category: Drinks
+    available: true
+    sortOrder: 30
+  - id: menu-beer
+    name: Italian Lager
+    description: 330ml bottle, 4.7%.
+    priceCents: 400
+    category: Drinks
+    available: true
+    sortOrder: 40

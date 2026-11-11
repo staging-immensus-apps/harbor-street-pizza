@@ -1,0 +1,6 @@
+{
+  "signIn": "optional",
+  "signUp": "invited",
+  "entry": "/",
+  "callerAuth": "none"
+}

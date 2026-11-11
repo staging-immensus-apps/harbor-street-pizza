@@ -8,7 +8,9 @@
     "node": ">=24",
     "harperdb": "^5.2"
   },
-  "dependencies": {},
+  "dependencies": {
+    "google-auth-library": "^10.5.0"
+  },
   "devDependencies": {
     "@radix-ui/react-slot": "^1.2.3",
     "@types/node": "^24.10.1",
@@ -56,6 +58,25 @@
     "deploy-gate-acceptance": "node scripts/deploy-gate-acceptance.js",
     "scheduler-probe": "node scripts/scheduler-probe.js",
     "suite-verdicts-acceptance": "node scripts/suite-verdicts-acceptance.js",
-    "check-build-stamp": "node scripts/build-stamp.js --self-test"
+    "check-build-stamp": "node scripts/build-stamp.js --self-test",
+    "auth-acceptance": "node scripts/auth-acceptance.js",
+    "session-acceptance": "node scripts/session-acceptance.js",
+    "admin-acceptance": "node scripts/admin-acceptance.js",
+    "account-acceptance": "node scripts/account-acceptance.js",
+    "plan-acceptance": "node scripts/plan-acceptance.js",
+    "check-signin-link": "node scripts/mint-signin-link.js --self-test",
+    "inbound-email-acceptance": "node scripts/inbound-email-acceptance.js",
+    "sign-in-preview-acceptance": "node scripts/sign-in-preview-acceptance.js",
+    "sign-in-support-acceptance": "node scripts/sign-in-support-acceptance.js",
+    "stripe-acceptance": "node scripts/stripe-acceptance.js",
+    "stripe-webhook-acceptance": "node scripts/stripe-webhook-acceptance.js",
+    "payments-preview-acceptance": "node scripts/payments-preview-acceptance.js",
+    "MenuApi-probe": "node scripts/MenuApi-probe.js",
+    "MenuAdminApi-probe": "node scripts/MenuAdminApi-probe.js",
+    "StoreInfoApi-probe": "node scripts/StoreInfoApi-probe.js",
+    "StoreSettingsApi-probe": "node scripts/StoreSettingsApi-probe.js",
+    "CheckoutApi-probe": "node scripts/CheckoutApi-probe.js",
+    "OrderConfirmationApi-probe": "node scripts/OrderConfirmationApi-probe.js",
+    "OrderAdminApi-probe": "node scripts/OrderAdminApi-probe.js"
   }
 }

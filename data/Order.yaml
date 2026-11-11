@@ -1,0 +1,228 @@
+# PREVIEW ONLY — example orders so the owner's queue, the confirmation page and the cleared-details
+# case all have something to show before a single real order exists. Never moved to
+# data/production/: these carry (invented) names, phone numbers and addresses.
+#
+# Four active (received, preparing, ready), three done, one awaiting payment, one older than the
+# twelve-month retention window with its personal details already cleared. `items` is the snapshot
+# the order was placed with, not a reference into MenuItem.
+database: data
+table: Order
+records:
+  - id: order-0001
+    code: Hs7Qk2mVzT4bPn9wRxL6yCd3Ja1Ue8Fg
+    placedAt: '2026-11-11T17:42:10.000Z'
+    status: received
+    queue: active
+    fulfilment: pickup
+    customerName: Priya Raman
+    customerPhone: '07700 900412'
+    deliveryAddress: null
+    deliveryPostcode: null
+    items:
+      - menuItemId: menu-margherita
+        name: Margherita
+        priceCents: 950
+        quantity: 2
+      - menuItemId: menu-cola
+        name: Cola
+        priceCents: 200
+        quantity: 2
+    itemsTotalCents: 2300
+    deliveryFeeCents: 0
+    totalCents: 2300
+    paymentStatus: paid
+    paymentRef: cs_test_preview_0001
+    readyEstimate: '2026-11-11T18:07:10.000Z'
+    personalDetailsClearedAt: null
+  - id: order-0002
+    code: Zq8Wd1nYbE5tKc7vMs2hRj6Lx4Po9Ai3
+    placedAt: '2026-11-11T17:35:02.000Z'
+    status: preparing
+    queue: active
+    fulfilment: delivery
+    customerName: Daniel Okafor
+    customerPhone: '07700 900318'
+    deliveryAddress: 14 Lordship Lane, Flat 2
+    deliveryPostcode: N174AB
+    items:
+      - menuItemId: menu-diavola
+        name: Diavola
+        priceCents: 1250
+        quantity: 1
+      - menuItemId: menu-garlic-bread-cheese
+        name: Garlic Bread with Cheese
+        priceCents: 550
+        quantity: 1
+    itemsTotalCents: 1800
+    deliveryFeeCents: 400
+    totalCents: 2200
+    paymentStatus: paid
+    paymentRef: cs_test_preview_0002
+    readyEstimate: '2026-11-11T18:20:02.000Z'
+    personalDetailsClearedAt: null
+  - id: order-0003
+    code: Vb3Nm6Xs9Qd2Hf8kJw5rTy1Lc7Gp4Ze0
+    placedAt: '2026-11-11T17:21:44.000Z'
+    status: ready
+    queue: active
+    fulfilment: pickup
+    customerName: Ellie Marsh
+    customerPhone: '07700 900155'
+    deliveryAddress: null
+    deliveryPostcode: null
+    items:
+      - menuItemId: menu-quattro-formaggi
+        name: Quattro Formaggi
+        priceCents: 1350
+        quantity: 1
+      - menuItemId: menu-rocket-salad
+        name: Rocket and Parmesan Salad
+        priceCents: 500
+        quantity: 1
+    itemsTotalCents: 1850
+    deliveryFeeCents: 0
+    totalCents: 1850
+    paymentStatus: pay_at_store
+    paymentRef: null
+    readyEstimate: '2026-11-11T17:46:44.000Z'
+    personalDetailsClearedAt: null
+  - id: order-0004
+    code: Ck9Tf2Rb7Jm4Yv1Ls8Nq3Ha6Wd5Ux0Ep
+    placedAt: '2026-11-11T17:05:19.000Z'
+    status: received
+    queue: active
+    fulfilment: delivery
+    customerName: Tomasz Nowak
+    customerPhone: '07700 900271'
+    deliveryAddress: 3 Seven Sisters Road
+    deliveryPostcode: N157PQ
+    items:
+      - menuItemId: menu-pepperoni
+        name: Pepperoni
+        priceCents: 1150
+        quantity: 3
+    itemsTotalCents: 3450
+    deliveryFeeCents: 400
+    totalCents: 3850
+    paymentStatus: paid
+    paymentRef: cs_test_preview_0004
+    readyEstimate: '2026-11-11T17:50:19.000Z'
+    personalDetailsClearedAt: null
+  - id: order-0005
+    code: Mf4Jp8Qw2Zx6Td1Rk9Bn5Lv3Cy7Hs0Go
+    placedAt: '2026-11-11T17:58:31.000Z'
+    status: awaiting_payment
+    queue: pending_payment
+    fulfilment: pickup
+    customerName: Sam Whitfield
+    customerPhone: '07700 900644'
+    deliveryAddress: null
+    deliveryPostcode: null
+    items:
+      - menuItemId: menu-funghi
+        name: Funghi
+        priceCents: 1150
+        quantity: 1
+    itemsTotalCents: 1150
+    deliveryFeeCents: 0
+    totalCents: 1150
+    paymentStatus: unpaid
+    paymentRef: cs_test_preview_0005
+    readyEstimate: null
+    personalDetailsClearedAt: null
+  - id: order-0006
+    code: Rt1Yh5Kd9Pw3Nz7Bq2Mx8Jc4Vs6Lf0Au
+    placedAt: '2026-11-10T19:12:08.000Z'
+    status: collected
+    queue: done
+    fulfilment: pickup
+    customerName: Aisha Bello
+    customerPhone: '07700 900903'
+    deliveryAddress: null
+    deliveryPostcode: null
+    items:
+      - menuItemId: menu-margherita
+        name: Margherita
+        priceCents: 950
+        quantity: 1
+      - menuItemId: menu-beer
+        name: Italian Lager
+        priceCents: 400
+        quantity: 2
+    itemsTotalCents: 1750
+    deliveryFeeCents: 0
+    totalCents: 1750
+    paymentStatus: paid
+    paymentRef: cs_test_preview_0006
+    readyEstimate: '2026-11-10T19:37:08.000Z'
+    personalDetailsClearedAt: null
+  - id: order-0007
+    code: Qn6Lb2Vz8Hm1Ps5Dw9Ty3Kx7Jr4Cf0Ei
+    placedAt: '2026-11-10T18:44:57.000Z'
+    status: collected
+    queue: done
+    fulfilment: delivery
+    customerName: George Hale
+    customerPhone: '07700 900120'
+    deliveryAddress: 88 Broad Lane
+    deliveryPostcode: N159RT
+    items:
+      - menuItemId: menu-pepperoni
+        name: Pepperoni
+        priceCents: 1150
+        quantity: 2
+      - menuItemId: menu-lemonade
+        name: Cloudy Lemonade
+        priceCents: 250
+        quantity: 2
+    itemsTotalCents: 2800
+    deliveryFeeCents: 400
+    totalCents: 3200
+    paymentStatus: paid
+    paymentRef: cs_test_preview_0007
+    readyEstimate: '2026-11-10T19:29:57.000Z'
+    personalDetailsClearedAt: null
+  - id: order-0008
+    code: Wd5Gx1Tn7Ry2Mk8Qa4Zc6Lp3Hv9Bs0Ju
+    placedAt: '2026-11-09T20:03:26.000Z'
+    status: cancelled
+    queue: done
+    fulfilment: pickup
+    customerName: Leah Brightwell
+    customerPhone: '07700 900777'
+    deliveryAddress: null
+    deliveryPostcode: null
+    items:
+      - menuItemId: menu-garlic-bread
+        name: Garlic Bread
+        priceCents: 450
+        quantity: 1
+    itemsTotalCents: 450
+    deliveryFeeCents: 0
+    totalCents: 450
+    paymentStatus: unpaid
+    paymentRef: null
+    readyEstimate: null
+    personalDetailsClearedAt: null
+  - id: order-0009
+    code: Pz3Cm7Vf1Xb9Ld4Ns8Tq2Hk6Rj5Wy0Ao
+    placedAt: '2025-06-03T18:30:00.000Z'
+    status: collected
+    queue: done
+    fulfilment: delivery
+    customerName: null
+    customerPhone: null
+    deliveryAddress: null
+    deliveryPostcode: null
+    items:
+      - menuItemId: menu-margherita
+        name: Margherita
+        priceCents: 900
+        quantity: 2
+    itemsTotalCents: 1800
+    deliveryFeeCents: 350
+    totalCents: 2150
+    paymentStatus: paid
+    paymentRef: cs_test_preview_0009
+    readyEstimate: '2025-06-03T19:15:00.000Z'
+    personalDetailsClearedAt: '2026-06-03T02:00:00.000Z'

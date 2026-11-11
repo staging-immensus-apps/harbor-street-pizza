@@ -4,18 +4,15 @@
 # resource sorts or filters by (rule 6) — an unindexed search returns empty, silently.
 # Short-lived tokens live on @table(expiration:) tables keyed by the token HASH (rule 10).
 #
-# config.yaml loads every `schema*.graphql` at the root, so a kit the platform copied in brings its
-# own tables in a file of its own — `schema.sign-in.graphql`, `schema.payments.graphql` — and this file
-# never has to know about them. Two things follow, both measured on a real
-# harper@5.3.1 on 2026-10-16. Harper reads each file on its own, so a type here cannot REFERENCE a type
-# declared in another file (`@relationship` to one is reported unknown): hold another table's id in a
-# plain indexed column instead. And a table declared in TWO files is not merged — the file Harper reads
-# last replaces the other's attributes whole, silently — so never declare a table a kit already has.
+# The sign-in kit brings User, MagicLink, EmailLog and EmailSuppression in schema.sign-in.graphql,
+# and the payments kit brings StripeEvent in schema.payments.graphql. Never declare those here: a
+# table declared in two files is not merged, it is replaced.
 
 # ── template-owned (additive changes only) ───────────────────────────────────
 
 # One row per scheduled run (resources/Scheduler.js). The template's only table: the scheduler is part
-# of the bare core and records what it ran.
+# of the bare core and records what it ran. This app writes one row per nightly retention sweep, with
+# a deterministic id (clear-personal-details:YYYY-MM-DD) so a repeated tick claims the same row.
 type LoopRun @table {
   id: ID @primaryKey
   loop: String @indexed
@@ -28,3 +25,58 @@ type LoopRun @table {
 }
 
 # ── app-owned (the builder writes below this line) ───────────────────────────
+
+# One item on the shop's menu. Prices are whole cents, never floats.
+type MenuItem @table {
+  id: ID @primaryKey
+  name: String @indexed
+  description: String
+  priceCents: Int
+  category: String @indexed
+  available: Boolean @indexed
+  sortOrder: Int @indexed
+  createdAt: Long @createdTime
+  updatedAt: Long @updatedTime
+}
+
+# One customer order. audit: true because the owner's order screen subscribes to this table for new
+# orders arriving without a reload (Harper refuses subscribe on a table with no audit store).
+# Line items are a snapshot of name and price at the time of ordering, so a later price change never
+# rewrites an old order.
+type Order @table(audit: true) {
+  id: ID @primaryKey
+  code: String @indexed
+  placedAt: String @indexed
+  status: String @indexed
+  queue: String @indexed
+  fulfilment: String @indexed
+  customerName: String
+  customerPhone: String
+  deliveryAddress: String
+  deliveryPostcode: String
+  items: [Any]
+  itemsTotalCents: Int
+  deliveryFeeCents: Int
+  totalCents: Int
+  paymentStatus: String @indexed
+  paymentRef: String @indexed
+  readyEstimate: String
+  personalDetailsClearedAt: String @indexed
+  updatedAt: Long @updatedTime
+}
+
+# A single row, id "store", holding the shop-level settings the owner edits. The resources fall back
+# to built-in defaults when the row is absent, so the app works before it is ever saved.
+type StoreSetting @table {
+  id: ID @primaryKey
+  storeName: String
+  acceptingOrders: Boolean
+  pausedMessage: String
+  pickupEnabled: Boolean
+  deliveryEnabled: Boolean
+  deliveryFeeCents: Int
+  deliveryPostcodes: [String]
+  pickupEstimateMinutes: Int
+  deliveryEstimateMinutes: Int
+  updatedAt: Long @updatedTime
+}

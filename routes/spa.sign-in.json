@@ -1,0 +1,7 @@
+[
+  { "path": "/login", "page": "Login" },
+  { "path": "/auth/verify", "page": "AuthVerify" },
+  { "path": "/invite", "page": "Invite" },
+  { "path": "/account", "page": "Account" },
+  { "path": "/admin/*", "page": "Admin", "admin": true }
+]
