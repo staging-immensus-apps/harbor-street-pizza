@@ -3,10 +3,15 @@
 // (the back-end charter: one hermetic probe per resource). Anonymous and a signed-in non-admin are
 // refused on every method with 403 and no WWW-Authenticate, and neither one writes or deletes a
 // row; an admin sees every item including hidden ones; a malformed price is 400 and writes
-// nothing; a forged id or createdAt in the body changes neither; a partial PATCH leaves the other
+// nothing; a forged id or createdAt in the body changes neither; a partial update leaves the other
 // fields alone; a demoted admin with an unexpired cookie is refused because the row is re-read;
 // delete removes the row and a second delete is 404; and deleting an item never touches an Order
 // row that snapshot it.
+//
+// THE UPDATE ROUTE IS PUT /MenuAdminApi/:id: Harper's REST layer answered 400 to PATCH before this
+// resource ever ran (measured on a real cluster, 2026-11-11), so every assertion below is driven
+// over BOTH verbs — PUT as the proven route, PATCH kept as an alias — to prove the body is identical
+// either way.
 //
 // Hermetic: clock frozen, no network, no git.
 
@@ -59,7 +64,7 @@ section('anonymous is refused on every method, and writes nothing')
   const before = tables.MenuItem.rows.size
   const cases = [
     ['GET', ''], ['GET', 'seed-1'], ['POST', '', { name: 'X', priceCents: 100 }],
-    ['PATCH', 'seed-1', { name: 'X' }], ['DELETE', 'seed-1'],
+    ['PUT', 'seed-1', { name: 'X' }], ['PATCH', 'seed-1', { name: 'X' }], ['DELETE', 'seed-1'],
   ]
   for (const [m, p, body] of cases) {
     const r = await call(MenuAdminApi, m, p, { body })
@@ -73,7 +78,7 @@ section('a signed-in non-admin is refused on every method, and writes nothing (N
   const before = tables.MenuItem.rows.size
   const cases = [
     ['GET', '', undefined], ['GET', 'seed-1', undefined], ['POST', '', { name: 'X', priceCents: 100 }],
-    ['PATCH', 'seed-1', { name: 'X' }], ['DELETE', 'seed-1', undefined],
+    ['PUT', 'seed-1', { name: 'X' }], ['PATCH', 'seed-1', { name: 'X' }], ['DELETE', 'seed-1', undefined],
   ]
   for (const [m, p, body] of cases) {
     const r = await call(MenuAdminApi, m, p, { cookie: MEMBER.cookie, body })
@@ -107,21 +112,37 @@ section('create validates the price and ignores a forged id / createdAt')
   check('a valid create -> 201, with a server-minted id and createdAt (NEG)', created.status === 201 && created.json?.item?.id && created.json.item.id !== 'forged' && created.json.item.createdAt !== '1999-01-01T00:00:00.000Z')
   check('the row category defaults when absent', created.json?.item?.category === 'Other')
   check('the row is now in the table', tables.MenuItem.rows.has(created.json.item.id))
-  globalThis.__created = created.json.item
 }
 
-section('PATCH is partial: one field changes, the rest survive')
-{
-  const id = globalThis.__created.id
-  const patched = await call(MenuAdminApi, 'PATCH', id, { cookie: ADMIN.cookie, body: { priceCents: 500 } })
-  check('PATCH priceCents only -> 200 and the price changed', patched.status === 200 && patched.json?.item?.priceCents === 500)
-  check('…and name, category untouched', patched.json?.item?.name === 'Garlic Bread' && patched.json.item.category === 'Other')
-  const forged = await call(MenuAdminApi, 'PATCH', id, { cookie: ADMIN.cookie, body: { id: 'other-id', createdAt: '1999-01-01T00:00:00.000Z', name: 'Garlic Bread (patched)' } })
-  check('a body naming id/createdAt on PATCH changes neither (NEG)', forged.status === 200 && forged.json?.item?.id === id && forged.json.item.createdAt === globalThis.__created.createdAt && forged.json.item.name === 'Garlic Bread (patched)')
-  const badPrice = await call(MenuAdminApi, 'PATCH', id, { cookie: ADMIN.cookie, body: { priceCents: -5 } })
-  check('a malformed PATCH price -> 400 and the row is unchanged (NEG)', badPrice.status === 400 && tables.MenuItem.rows.get(id).priceCents === 500)
-  const missing = await call(MenuAdminApi, 'PATCH', 'no-such-id', { cookie: ADMIN.cookie, body: { name: 'X' } })
-  check('PATCH of an unknown id -> 404', missing.status === 404)
+section('the update route (PUT, proven on the cluster) and its PATCH alias are both partial: one field changes, the rest survive')
+for (const verb of ['PUT', 'PATCH']) {
+  // Each verb gets its own freshly-created row so the two passes cannot see each other's writes.
+  const created = await call(MenuAdminApi, 'POST', '', { cookie: ADMIN.cookie, body: { name: 'Garlic Bread', priceCents: 450 } })
+  check(`${verb}: setup create -> 201`, created.status === 201)
+  const id = created.json.item.id
+  const createdAt = created.json.item.createdAt
+
+  const updated = await call(MenuAdminApi, verb, id, { cookie: ADMIN.cookie, body: { priceCents: 500 } })
+  check(`${verb} priceCents only -> 200 and the price changed`, updated.status === 200 && updated.json?.item?.priceCents === 500)
+  check(`${verb}: …and name, category untouched`, updated.json?.item?.name === 'Garlic Bread' && updated.json.item.category === 'Other')
+
+  const forged = await call(MenuAdminApi, verb, id, { cookie: ADMIN.cookie, body: { id: 'other-id', createdAt: '1999-01-01T00:00:00.000Z', name: 'Garlic Bread (patched)' } })
+  check(`${verb}: a body naming id/createdAt changes neither (NEG)`, forged.status === 200 && forged.json?.item?.id === id && forged.json.item.createdAt === createdAt && forged.json.item.name === 'Garlic Bread (patched)')
+
+  const badPrice = await call(MenuAdminApi, verb, id, { cookie: ADMIN.cookie, body: { priceCents: -5 } })
+  check(`${verb}: a malformed price -> 400 with an error field, and the row is unchanged (NEG)`, badPrice.status === 400 && typeof badPrice.json?.error === 'string' && tables.MenuItem.rows.get(id).priceCents === 500)
+
+  const missing = await call(MenuAdminApi, verb, 'no-such-id', { cookie: ADMIN.cookie, body: { name: 'X' } })
+  check(`${verb} of an unknown id -> 404`, missing.status === 404)
+
+  const sub = await call(MenuAdminApi, verb, `${id}/extra`, { cookie: ADMIN.cookie, body: { name: 'X' } })
+  check(`${verb} of a sub-path -> 404`, sub.status === 404)
+
+  const member = await call(MenuAdminApi, verb, id, { cookie: MEMBER.cookie, body: { name: 'hijack' } })
+  check(`${verb}: a signed-in non-admin -> 403 admin_required, no WWW-Authenticate, row unchanged (NEG)`, member.status === 403 && member.json?.code === 'admin_required' && !member.headers.get('www-authenticate') && tables.MenuItem.rows.get(id).name === 'Garlic Bread (patched)')
+
+  const anon = await call(MenuAdminApi, verb, id, { body: { name: 'hijack' } })
+  check(`${verb}: anonymous -> 403 auth_required, no WWW-Authenticate, row unchanged (NEG)`, anon.status === 403 && anon.json?.code === 'auth_required' && !anon.headers.get('www-authenticate') && tables.MenuItem.rows.get(id).name === 'Garlic Bread (patched)')
 }
 
 section('a demoted admin with an unexpired cookie is refused (the row is re-read)')

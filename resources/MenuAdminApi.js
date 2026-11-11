@@ -4,7 +4,12 @@
 //   GET    /MenuAdminApi/          every item, sortMenu + adminMenuItem
 //   GET    /MenuAdminApi/:id       one item, or 404
 //   POST   /MenuAdminApi/         { name, description?, priceCents, category?, available?, sortOrder? } → 201 { item }
-//   PATCH  /MenuAdminApi/:id      partial update → { item }
+//   PUT    /MenuAdminApi/:id      partial update → { item } — the update route. Harper's REST layer
+//                                 answered 400 to PATCH before this resource ever ran (measured on
+//                                 the cluster, 2026-11-11), so the update is served on PUT, the verb
+//                                 the platform's own worked examples use (MembersApi, StoreSettingsApi,
+//                                 AdminApi, AccountApi); PATCH is kept working as an alias, same body
+//                                 shape, in case a client still sends it.
 //   DELETE /MenuAdminApi/:id      → { ok: true }
 //
 // Every method is admin-only (rule: an app with no customer accounts, only the owner signs in).
@@ -59,21 +64,14 @@ export class MenuAdminApi extends Resource {
     })
   }
 
+  async put (target, data) {
+    target.checkPermission = false
+    return applyUpdate(this, target, data)
+  }
+
   async patch (target, data) {
     target.checkPermission = false
-    return runAuthed(async () => {
-      await requireAdmin(this)
-      const [id, sub] = segmentsOf(target)
-      if (!id || sub) return json({ error: 'not found' }, 404)
-      const existing = await db.MenuItem.get(id)
-      if (!existing) return json({ error: 'not found' }, 404)
-      const body = data && typeof data === 'object' ? data : {}
-      const fields = validateMenuItem(body, { partial: true })
-      if (fields.error) return json({ error: fields.error }, 400)
-      const row = { ...existing, ...fields.value, id: existing.id, createdAt: existing.createdAt, updatedAt: new Date().toISOString() }
-      await db.MenuItem.put(row)
-      return json({ item: adminMenuItem(row) })
-    })
+    return applyUpdate(this, target, data)
   }
 
   async delete (target) {
@@ -88,4 +86,25 @@ export class MenuAdminApi extends Resource {
       return json({ ok: true })
     })
   }
+}
+
+/**
+ * The partial-update body shared by put() and patch() (rule 1 in the task that split this out:
+ * same validation, same merge, same response, served on either verb). Semantics stay PARTIAL for
+ * both — the editor dialog sends only the changed fields.
+ */
+async function applyUpdate (self, target, data) {
+  return runAuthed(async () => {
+    await requireAdmin(self)
+    const [id, sub] = segmentsOf(target)
+    if (!id || sub) return json({ error: 'not found' }, 404)
+    const existing = await db.MenuItem.get(id)
+    if (!existing) return json({ error: 'not found' }, 404)
+    const body = data && typeof data === 'object' ? data : {}
+    const fields = validateMenuItem(body, { partial: true })
+    if (fields.error) return json({ error: fields.error }, 400)
+    const row = { ...existing, ...fields.value, id: existing.id, createdAt: existing.createdAt, updatedAt: new Date().toISOString() }
+    await db.MenuItem.put(row)
+    return json({ item: adminMenuItem(row) })
+  })
 }

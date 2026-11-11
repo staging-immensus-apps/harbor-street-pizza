@@ -896,8 +896,20 @@ section('every look compiles')
     const before = treeShas(w)
     applyLook(w, id)
     const touched = changedBetween(before, treeShas(w))
-    check(`${id}: applying it writes only ${TARGET}`,
-      touched.length === 1 && touched[0] === TARGET, touched.join(', ') || '(nothing at all)')
+    // NOTHING OUTSIDE THE SEAM, rather than "exactly one file changed", and the difference is
+    // load-bearing for an app that SHIPS one of the five. This loop applies every look in
+    // `order` over a fixture of the app's OWN src/, so the iteration for the look the app already
+    // wears re-composes bytes identical to the ones on disk — applyLook() is a pure compose +
+    // writeFileSync with no diffing, so the sha does not move and `touched` is EMPTY. Demanding
+    // `length === 1` therefore failed every app whose look is IDS[0], from the app's own data and
+    // with nothing wrong with it (this one: CLAUDE.md §1 chose `studio`, and `order` lists studio
+    // first). A no-op rewrite of the target is not a blast-radius defect, and the two things that
+    // assertion was carrying are both still asserted, each where it can say no: the strict
+    // "exactly TARGET and nothing else" lives above with a negative control that adds a second
+    // write and requires the comparison to name it, and "the look actually took" is the distinct
+    // -stylesheet check below, which reads the compiled CSS rather than the file set.
+    check(`${id}: applying it writes nothing outside ${TARGET}`,
+      touched.every((f) => f === TARGET), touched.join(', '))
     let css = ''
     let err = null
     try { css = await compile(w) } catch (e) { err = e }

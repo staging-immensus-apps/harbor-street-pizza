@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // GENERATED — OrderAdminApi over resources/OrderAdminApi.js, the shop's owner-only live queue and
 // the only resource that ever serves a customer's name, phone number or delivery address
-// (CLAUDE.md §9). Proves every entry point — GET list, GET one, PATCH and the live stream's
+// (CLAUDE.md §9). Proves every entry point — GET list, GET one, PUT/PATCH and the live stream's
 // connect() — refuses anonymous, a signed-in non-admin and a demoted admin with 403 and no
 // WWW-Authenticate, that none of those refusals leak a customer's details, that connect() never
 // reaches subscribe() without passing requireAdmin first, that the default list is the active
-// queue and a junk ?queue= falls back to it, and that a status PATCH keeps the queue in lockstep
-// with the status while the body cannot smuggle a change to any other field.
+// queue and a junk ?queue= falls back to it, and that a status update keeps the queue in lockstep
+// with the status while the body cannot smuggle a change to any other field. PUT is the verb the
+// front end calls (Harper's REST layer answered PATCH with a 400 before the resource ran, measured
+// on a real cluster 2026-11-11), so every assertion below is driven over BOTH PUT and PATCH.
 //
 // Hermetic: clock frozen, no network, no git.
 
@@ -91,9 +93,11 @@ for (const [label, cookie, expectCode] of [['anonymous', null, 'auth_required'],
   check(`${label}: GET one → 403 ${expectCode}`, one.status === 403 && one.json?.code === expectCode)
   check(`${label}: …and no customer data either`, !leaksCustomerInfo(one.json, ALL_NAMES, ALL_PHONES))
 
-  const before = { ...tables.Order.rows.get(A1) }
-  const patch = await call(OrderAdminApi, 'PATCH', A1, { cookie, body: { status: 'preparing' } })
-  check(`${label}: PATCH → 403 ${expectCode}, and the row is untouched`, patch.status === 403 && patch.json?.code === expectCode && tables.Order.rows.get(A1).status === before.status)
+  for (const verb of ['PUT', 'PATCH']) {
+    const before = { ...tables.Order.rows.get(A1) }
+    const upd = await call(OrderAdminApi, verb, A1, { cookie, body: { status: 'preparing' } })
+    check(`${label}: ${verb} → 403 ${expectCode}, and the row is untouched`, upd.status === 403 && upd.json?.code === expectCode && tables.Order.rows.get(A1).status === before.status)
+  }
 }
 
 section('connect(): the live stream is admin-only and never reaches subscribe without passing it')
@@ -162,41 +166,63 @@ section('GET one order')
   check('an unknown sub-path → 404', deep.status === 404)
 }
 
-section('PATCH advances status and keeps the queue in lockstep')
-{
-  const toDone = await call(OrderAdminApi, 'PATCH', A1, { cookie: ADMIN.cookie, body: { status: 'collected' } })
-  check('PATCH status: collected → 200, status and queue both move', toDone.status === 200 && toDone.json?.order?.status === 'collected' && toDone.json.order.queue === 'done')
-  check('…and the stored row agrees (read from the table, not the response)', tables.Order.rows.get(A1).status === 'collected' && tables.Order.rows.get(A1).queue === 'done')
+// Every section below runs once per verb, PUT first (the route the front end actually calls)
+// then PATCH (kept as an alias), each on its OWN fresh pair of rows so the two runs cannot step
+// on each other's writes. The row ids are namespaced by verb; everything else about the fixture
+// (statuses, queues, customer fields) mirrors A1/A2/D1/P1 above.
+for (const verb of ['PUT', 'PATCH']) {
+  const tag = verb.toLowerCase()
+  const vA1 = `order-${tag}-a1`
+  const vA2 = `order-${tag}-a2`
+  const vD1 = `order-${tag}-d1`
+  const vP1 = `order-${tag}-p1`
+  await tables.Order.put(makeOrder({ id: vA1, placedAt: '2026-02-01T00:00:00.000Z', status: 'received', queue: 'active', customerName: 'Ada Lovelace', customerPhone: '555-0100' }))
+  await tables.Order.put(makeOrder({ id: vA2, placedAt: '2026-02-02T00:00:00.000Z', status: 'received', queue: 'active', customerName: 'Grace Hopper', customerPhone: '555-0200' }))
+  await tables.Order.put(makeOrder({ id: vD1, placedAt: '2026-02-03T00:00:00.000Z', status: 'collected', queue: 'done', customerName: 'Done Person', customerPhone: '555-0300' }))
+  await tables.Order.put(makeOrder({ id: vP1, placedAt: '2026-02-04T00:00:00.000Z', status: 'awaiting_payment', queue: 'pending_payment', customerName: 'Pending Person', customerPhone: '555-0400', paymentStatus: 'unpaid' }))
 
-  const toPreparing = await call(OrderAdminApi, 'PATCH', A2, { cookie: ADMIN.cookie, body: { status: 'preparing' } })
-  check('PATCH status: preparing → 200, queue stays active', toPreparing.status === 200 && toPreparing.json?.order?.status === 'preparing' && toPreparing.json.order.queue === 'active')
-  check('…and the stored row agrees', tables.Order.rows.get(A2).status === 'preparing' && tables.Order.rows.get(A2).queue === 'active')
+  section(`${verb} advances status and keeps the queue in lockstep`)
+  {
+    const toDone = await call(OrderAdminApi, verb, vA1, { cookie: ADMIN.cookie, body: { status: 'collected' } })
+    check(`${verb} status: collected → 200, status and queue both move`, toDone.status === 200 && toDone.json?.order?.status === 'collected' && toDone.json.order.queue === 'done')
+    check('…and the stored row agrees (read from the table, not the response)', tables.Order.rows.get(vA1).status === 'collected' && tables.Order.rows.get(vA1).queue === 'done')
 
-  const toCancelled = await call(OrderAdminApi, 'PATCH', A2, { cookie: ADMIN.cookie, body: { status: 'cancelled' } })
-  check('PATCH status: cancelled → 200, queue moves to done', toCancelled.status === 200 && toCancelled.json?.order?.queue === 'done')
-  check('…and the stored row agrees', tables.Order.rows.get(A2).status === 'cancelled' && tables.Order.rows.get(A2).queue === 'done')
-}
+    const toPreparing = await call(OrderAdminApi, verb, vA2, { cookie: ADMIN.cookie, body: { status: 'preparing' } })
+    check(`${verb} status: preparing → 200, queue stays active`, toPreparing.status === 200 && toPreparing.json?.order?.status === 'preparing' && toPreparing.json.order.queue === 'active')
+    check('…and the stored row agrees', tables.Order.rows.get(vA2).status === 'preparing' && tables.Order.rows.get(vA2).queue === 'active')
 
-section('PATCH refuses a status the owner may not set, and changes nothing when it does (NEG)')
-{
-  const before = { ...tables.Order.rows.get(D1) }
-  const awaiting = await call(OrderAdminApi, 'PATCH', D1, { cookie: ADMIN.cookie, body: { status: 'awaiting_payment' } })
-  check('status: awaiting_payment is Stripe\'s to clear → 400, row untouched', awaiting.status === 400 && tables.Order.rows.get(D1).status === before.status && tables.Order.rows.get(D1).queue === before.queue)
+    const toCancelled = await call(OrderAdminApi, verb, vA2, { cookie: ADMIN.cookie, body: { status: 'cancelled' } })
+    check(`${verb} status: cancelled → 200, queue moves to done`, toCancelled.status === 200 && toCancelled.json?.order?.queue === 'done')
+    check('…and the stored row agrees', tables.Order.rows.get(vA2).status === 'cancelled' && tables.Order.rows.get(vA2).queue === 'done')
+  }
 
-  const invented = await call(OrderAdminApi, 'PATCH', D1, { cookie: ADMIN.cookie, body: { status: 'hungry' } })
-  check('an invented status → 400, row untouched', invented.status === 400 && tables.Order.rows.get(D1).status === before.status)
+  section(`${verb} refuses a status the owner may not set, and changes nothing when it does (NEG)`)
+  {
+    const before = { ...tables.Order.rows.get(vD1) }
+    const awaiting = await call(OrderAdminApi, verb, vD1, { cookie: ADMIN.cookie, body: { status: 'awaiting_payment' } })
+    check('status: awaiting_payment is Stripe\'s to clear → 400, row untouched', awaiting.status === 400 && awaiting.json?.error && tables.Order.rows.get(vD1).status === before.status && tables.Order.rows.get(vD1).queue === before.queue)
 
-  const missing = await call(OrderAdminApi, 'PATCH', D1, { cookie: ADMIN.cookie, body: {} })
-  check('a missing status → 400, row untouched', missing.status === 400 && tables.Order.rows.get(D1).status === before.status)
-}
+    const invented = await call(OrderAdminApi, verb, vD1, { cookie: ADMIN.cookie, body: { status: 'hungry' } })
+    check('an invented status → 400, row untouched', invented.status === 400 && invented.json?.error && tables.Order.rows.get(vD1).status === before.status)
 
-section('PATCH cannot smuggle a change to a protected field (NEG)')
-{
-  const before = { ...tables.Order.rows.get(P1) }
-  const forged = await call(OrderAdminApi, 'PATCH', P1, { cookie: ADMIN.cookie, body: { status: 'received', totalCents: 999999, paymentStatus: 'paid', code: 'forged-code', customerPhone: '000-0000' } })
-  check('status is applied…', forged.status === 200 && forged.json?.order?.status === 'received')
-  check('…but totalCents, paymentStatus, code and customerPhone are all unchanged', forged.json.order.totalCents === before.totalCents && forged.json.order.paymentStatus === before.paymentStatus && forged.json.order.code === before.code && forged.json.order.customerPhone === before.customerPhone)
-  check('…and the stored row agrees', tables.Order.rows.get(P1).totalCents === before.totalCents && tables.Order.rows.get(P1).paymentStatus === before.paymentStatus && tables.Order.rows.get(P1).code === before.code && tables.Order.rows.get(P1).customerPhone === before.customerPhone)
+    const missing = await call(OrderAdminApi, verb, vD1, { cookie: ADMIN.cookie, body: {} })
+    check('a missing status → 400, row untouched', missing.status === 400 && missing.json?.error && tables.Order.rows.get(vD1).status === before.status)
+
+    const missingId = await call(OrderAdminApi, verb, 'no-such-order', { cookie: ADMIN.cookie, body: { status: 'preparing' } })
+    check('an unknown id → 404', missingId.status === 404)
+
+    const deep = await call(OrderAdminApi, verb, `${vD1}/extra`, { cookie: ADMIN.cookie, body: { status: 'preparing' } })
+    check('an unknown sub-path → 404', deep.status === 404)
+  }
+
+  section(`${verb} cannot smuggle a change to a protected field (NEG)`)
+  {
+    const before = { ...tables.Order.rows.get(vP1) }
+    const forged = await call(OrderAdminApi, verb, vP1, { cookie: ADMIN.cookie, body: { status: 'received', id: 'forged-id', totalCents: 999999, paymentStatus: 'paid', paymentRef: 'forged-ref', code: 'forged-code', customerPhone: '000-0000', items: [{ menuItemId: 'forged', name: 'Forged', priceCents: 1, quantity: 99 }] } })
+    check('status is applied…', forged.status === 200 && forged.json?.order?.status === 'received')
+    check('…but id, code, items, totalCents, paymentStatus, paymentRef and customerPhone are all unchanged', forged.json.order.id === vP1 && forged.json.order.totalCents === before.totalCents && forged.json.order.paymentStatus === before.paymentStatus && forged.json.order.paymentRef === before.paymentRef && forged.json.order.code === before.code && forged.json.order.customerPhone === before.customerPhone && JSON.stringify(forged.json.order.items) === JSON.stringify(before.items))
+    check('…and the stored row agrees', tables.Order.rows.get(vP1).id === vP1 && tables.Order.rows.get(vP1).totalCents === before.totalCents && tables.Order.rows.get(vP1).paymentStatus === before.paymentStatus && tables.Order.rows.get(vP1).paymentRef === before.paymentRef && tables.Order.rows.get(vP1).code === before.code && tables.Order.rows.get(vP1).customerPhone === before.customerPhone)
+  }
 }
 
 section('a demoted admin with an unexpired cookie is refused on every entry point')
@@ -210,9 +236,11 @@ section('a demoted admin with an unexpired cookie is refused on every entry poin
   check('after demotion the same cookie → 403 admin_required on GET list', list.status === 403 && list.json?.code === 'admin_required')
   const one = await call(OrderAdminApi, 'GET', A1, { cookie: DEMOTED.cookie })
   check('…and on GET one', one.status === 403 && one.json?.code === 'admin_required')
-  const before = { ...tables.Order.rows.get(A1) }
-  const patch = await call(OrderAdminApi, 'PATCH', A1, { cookie: DEMOTED.cookie, body: { status: 'ready' } })
-  check('…and on PATCH, which changes nothing', patch.status === 403 && tables.Order.rows.get(A1).status === before.status)
+  for (const verb of ['PUT', 'PATCH']) {
+    const before = { ...tables.Order.rows.get(A1) }
+    const upd = await call(OrderAdminApi, verb, A1, { cookie: DEMOTED.cookie, body: { status: 'ready' } })
+    check(`…and on ${verb}, which changes nothing`, upd.status === 403 && tables.Order.rows.get(A1).status === before.status)
+  }
 
   let called = false
   tables.Order.subscribe = () => { called = true; return { async *[Symbol.asyncIterator] () {} } }

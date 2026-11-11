@@ -4,8 +4,18 @@
 //
 //   GET   /OrderAdminApi?queue=active|done|pending_payment   the named queue, newest first, with counts
 //   GET   /OrderAdminApi/:id                                  one order in full, or 404
-//   PATCH /OrderAdminApi/:id   { status }                     advance the status; the queue is derived
-//                                                              from it so the two can never disagree
+//   PUT   /OrderAdminApi/:id   { status }                     advance the status; the queue is derived
+//                                                              from it so the two can never disagree.
+//                                                              PUT is the route the front end calls: on
+//                                                              a real cluster (measured 2026-11-11)
+//                                                              Harper's REST layer answered PATCH with a
+//                                                              400 before this resource's patch() ever
+//                                                              ran — PATCH is not a verb any seeded or
+//                                                              reviewed resource in this platform uses,
+//                                                              while PUT is the proven update verb
+//                                                              (MembersApi, StoreSettingsApi, AdminApi,
+//                                                              AccountApi). PATCH is kept as an alias
+//                                                              for anything that does reach it.
 //   connect (SSE)                                             live Order arrivals/changes, admin-only
 //
 // No POST, no DELETE: an order is created by CheckoutApi and never removed.
@@ -32,26 +42,14 @@ export class OrderAdminApi extends Resource {
     })
   }
 
+  async put (target, data) {
+    target.checkPermission = false
+    return applyStatus(this, target, data)
+  }
+
   async patch (target, data) {
     target.checkPermission = false
-    return runAuthed(async () => {
-      await requireAdmin(this)
-      const [id, sub] = segmentsOf(target)
-      if (!id || sub) return json({ error: 'not found' }, 404)
-      const existing = await db.Order.get(id)
-      if (!existing) return json({ error: 'not found' }, 404)
-      const body = data && typeof data === 'object' ? data : {}
-      const status = body.status
-      if (!OWNER_SETTABLE_STATUSES.includes(status)) {
-        return json({ error: `status must be one of ${OWNER_SETTABLE_STATUSES.join(', ')}` }, 400)
-      }
-      // Only status and the queue it implies are ever written: everything else — id, code,
-      // items, every total, paymentStatus, paymentRef, the customer's details — is restated
-      // from the stored row, so a body carrying those fields changes nothing.
-      const row = { ...existing, status, queue: queueForStatus(status) }
-      await db.Order.put(row)
-      return json({ order: adminOrderView(row) })
-    })
+    return applyStatus(this, target, data)
   }
 
   /**
@@ -81,4 +79,29 @@ export class OrderAdminApi extends Resource {
     }
     return json({ orders: rows.map(adminOrderView), queue, counts })
   }
+}
+
+/**
+ * Advance an order's status, shared by put() and patch() (see the header comment for why PUT is
+ * the route the front end uses). `self` is the resource instance, for requireAdmin().
+ */
+async function applyStatus (self, target, data) {
+  return runAuthed(async () => {
+    await requireAdmin(self)
+    const [id, sub] = segmentsOf(target)
+    if (!id || sub) return json({ error: 'not found' }, 404)
+    const existing = await db.Order.get(id)
+    if (!existing) return json({ error: 'not found' }, 404)
+    const body = data && typeof data === 'object' ? data : {}
+    const status = body.status
+    if (!OWNER_SETTABLE_STATUSES.includes(status)) {
+      return json({ error: `status must be one of ${OWNER_SETTABLE_STATUSES.join(', ')}` }, 400)
+    }
+    // Only status and the queue it implies are ever written: everything else — id, code,
+    // items, every total, paymentStatus, paymentRef, the customer's details — is restated
+    // from the stored row, so a body carrying those fields changes nothing.
+    const row = { ...existing, status, queue: queueForStatus(status) }
+    await db.Order.put(row)
+    return json({ order: adminOrderView(row) })
+  })
 }
