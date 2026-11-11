@@ -1,113 +1,41 @@
 {
-  "verdict": "FAILED",
+  "verdict": "PARTIAL",
   "stories": [
     {
-      "id": "browse-menu",
-      "status": "pass",
-      "severity": "blocker",
-      "area": null,
-      "message": "Anonymous visit to / shows full menu grouped by category (Drinks, Pizzas, Sides) with name, description and price for every item (e.g. Margherita — San Marzano tomato, fior di latte, basil — £9.50).",
-      "evidenceTier": 1,
-      "evidence": [
-        "GET /MenuApi 200 (p11 network log)",
-        "page_text of / listing 12 items with descriptions and prices"
-      ],
-      "screenshots": [
-        "job_5f38ae9061833ee8-p13-1-light-375.png",
-        "job_5f38ae9061833ee8-p13-2-dark-1280.png"
-      ],
-      "signedInAs": null
-    },
-    {
-      "id": "choose-pickup-or-delivery",
-      "status": "pass",
-      "severity": "blocker",
-      "area": null,
-      "message": "On /checkout, Pickup is selected by default showing only Name/Phone fields and a 25-min estimate; clicking Delivery adds Delivery address, Postcode fields, a £4.00 delivery fee line and a 45-min estimate. Run anonymously as a guest customer, since this app has no customer accounts.",
-      "evidenceTier": 1,
-      "evidence": [
-        "page_text of /checkout in Pickup mode: 'Pickup\\nDelivery\\nName\\nPhone...Ready estimate: around 25 min'",
-        "page_text of /checkout in Delivery mode: 'Delivery address\\nPostcode\\nName\\nPhone...Delivery fee £4.00...Ready estimate: around 45 min'"
-      ],
-      "screenshots": [
-        "job_5f38ae9061833ee8-p13-3-light-375.png",
-        "job_5f38ae9061833ee8-p13-4-dark-1280.png"
-      ],
-      "signedInAs": null
-    },
-    {
-      "id": "pay-online",
-      "status": "not_testable",
-      "severity": "blocker",
-      "area": null,
-      "message": "No Stripe key is configured on this deploy, so per the app's own documented design checkout never reaches a payment step and places the order directly with paymentStatus 'pay_at_store' (confirmed on the confirmation page: 'Payment: Pay at store'). Testing a real Stripe Checkout Session requires the owner's live Stripe key — a real third party this QA pass cannot use. Everything short of reaching Stripe (basket -> checkout -> order placed) was exercised and worked.",
-      "evidenceTier": 2,
-      "evidence": [
-        "POST /CheckoutApi/order 201, GET /OrderConfirmationApi/... 200",
-        "confirmation page text: 'Payment\\nPay at store'"
-      ],
-      "signedInAs": null
-    },
-    {
-      "id": "order-confirmation",
-      "status": "pass",
-      "severity": "major",
-      "area": null,
-      "message": "After placing a guest order, customer is taken to /order/:code showing order number, status (Received), payment state (Pay at store), fulfilment (Pickup), estimated ready time, placed date, full item lines and total. Run anonymously as guest customer (no account in this app).",
-      "evidenceTier": 1,
-      "evidence": [
-        "POST /CheckoutApi/order 201 then GET /OrderConfirmationApi/z9ln1-q1euiXjzyDptlHFiYwphK0Q4jU 200",
-        "page_text: 'Order confirmation / Order z9ln1-q1... / Status Received / Payment Pay at store / Fulfilment Pickup / Estimated ready 8:13 PM / Items ...'"
-      ],
-      "screenshots": [
-        "job_5f38ae9061833ee8-p12-1-light-375.png",
-        "job_5f38ae9061833ee8-p12-2-dark-1280.png"
-      ],
-      "signedInAs": null
-    },
-    {
-      "id": "view-new-orders",
-      "status": "pass",
-      "severity": "blocker",
-      "area": null,
-      "message": "Signed in as owner (password admin account) on /manage/orders, read the queue, then placed a new guest order from a separate anonymous page without ever reloading or re-navigating the owner's page, and a re-read of the owner page's text showed the new order (#2mwMjKlB, 'Live Stream QA') at the top of the list — proving it arrived live. Items, pickup/delivery and payment status are shown per order.",
-      "evidenceTier": 1,
-      "evidence": [
-        "Owner page text before: queue without #2mwMjKlB",
-        "anonymous page: POST /CheckoutApi/order 201 for Live Stream QA",
-        "Owner page text after (no navigate call in between): '#2mwMjKlB ... Live Stream QA · 07700900777 ... Payment: Pay at store' at top of queue"
-      ],
-      "screenshots": [
-        "job_5f38ae9061833ee8-p12-5-light-375.png",
-        "job_5f38ae9061833ee8-p12-6-dark-1280.png"
-      ],
-      "signedInAs": "admin"
-    },
-    {
-      "id": "update-menu",
+      "id": "pizzas-before-drinks",
       "status": "fail",
-      "severity": "blocker",
-      "area": "backend",
-      "message": "Signed in as owner on /manage/menu, opened Edit on 'Cola' and clicked Save (both with an edited price and, on retry, with no changes at all) — every attempt gets POST /MenuAdminApi/update 400, and the page shows 'Bad Request' inline. The item is never updated.",
+      "severity": "minor",
+      "area": "frontend",
+      "message": "Home menu shows Pizzas above Drinks (acceptance line 1 met). Acceptance line 2 is not met: MenuApi's category order (Drinks, Pizzas, Sides) is alphabetical and represents the categories' pre-change relative order. The rendered home page order is Pizzas, Sides, Drinks -- Sides now sits before Drinks, reversing their earlier relative order, so a category other than Pizzas did not keep its position relative to the other categories.",
       "evidenceTier": 1,
       "evidence": [
-        "POST /MenuAdminApi/update 400 (read_network)",
-        "page_text: 'Edit item\\n\\nCola\\n\\nBad Request\\nName\\nDescription\\nPrice...'"
+        "GET /preview/MenuApi categories order: Drinks, Pizzas, Sides",
+        "Home page (anonymous) text dump order: Pizzas, Sides, Drinks"
       ],
-      "signedInAs": "admin"
+      "screenshots": [
+        "job_3ad9365e5940ceec-p1-1-light-375.png",
+        "job_3ad9365e5940ceec-p1-3-light-1280.png"
+      ],
+      "signedInAs": null
     },
     {
-      "id": "update-order-status",
+      "id": "delivery-radius-line",
       "status": "fail",
-      "severity": "major",
-      "area": "backend",
-      "message": "Signed in as owner on /manage/orders, clicked 'Mark preparing' on one order and 'Mark collected' on a different order — both calls hit POST /OrderAdminApi/status and return 400 Bad Request; the page shows 'Bad Request' inline and the order's status does not change. Reproduced on two separate orders.",
+      "severity": "minor",
+      "area": "frontend",
+      "message": "'We deliver within 3 miles' appears directly under the shop name in the home page hero. But the shop name 'Harbor Street Pizza' is also shown to customers in the top nav/shell header on every other customer-facing page checked (/basket, /checkout, the order confirmation page /order/:code), and the note is absent there, so it is not present 'wherever the shop name is shown to customers' as the acceptance line requires.",
       "evidenceTier": 1,
       "evidence": [
-        "POST /OrderAdminApi/status 400 (read_network), twice on different order ids",
-        "page_text showing 'Bad Request' banner above the still-unchanged queue"
+        "Home page text dump: nav 'Harbor Street Pizza' then hero 'Harbor Street Pizza / We deliver within 3 miles'",
+        "/basket text dump: 'Harbor Street Pizza / Sign in / Your basket' -- no delivery line",
+        "/checkout text dump: 'Harbor Street Pizza / Sign in / Checkout' -- no delivery line",
+        "/order/<code> confirmation text dump: 'Harbor Street Pizza / Sign in / Order confirmation...' -- no delivery line"
       ],
-      "signedInAs": "admin"
+      "screenshots": [
+        "job_3ad9365e5940ceec-p1-1-light-375.png",
+        "job_3ad9365e5940ceec-p1-5-light-375.png"
+      ],
+      "signedInAs": null
     }
   ],
   "cross": {
@@ -117,15 +45,8 @@
     "rollbackReady": "not_testable"
   },
   "consoleErrors": [],
-  "defects": [
-    {
-      "area": "backend",
-      "file": null,
-      "message": "Both admin mutation endpoints that take an identifier plus a changed field (MenuAdminApi/update, OrderAdminApi/status) return 400 Bad Request on every call observed, including a no-op edit-and-save with unchanged values. StoreSettingsApi's PUT (a single-row save with no id in the body) succeeded (200), which narrows the defect to whatever these two endpoints have in common — likely how the item/order id or the changed field is validated or shaped in the request body.",
-      "severity": "blocker"
-    }
-  ],
-  "notes": "Owner sign-in used the seeded admin/password account via the app's own /login 'Sign in with a password' path (there is no owner test account marked signIn:link). Member and member2 link accounts were used only for the roleEscalation cross-probe. Email send is correctly disabled (emailSignIn:false, no Resend key) and the sign-in page says so; this is expected per the task brief, not a defect.",
+  "defects": [],
+  "notes": "Walk scoped to the two stories about this look/content change (pizza-before-drinks ordering, delivery-radius note) plus the standard cross-cutting probes. Did not re-walk admin menu/order-update flows this round, which earlier runs reported as broken (MenuAdminApi/OrderAdminApi 400s) -- not re-verified here since no story in this batch touches them.",
   "accessTest": {
     "result": "not_testable",
     "reached": [],
