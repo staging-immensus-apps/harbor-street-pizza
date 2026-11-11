@@ -1,0 +1,49 @@
+/* Harbor — Clear and dependable. Feels like a service people trust. */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222.2 47.4% 11.2%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 47.4% 11.2%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 47.4% 11.2%;
+    --primary: 224.3 76.3% 48%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 214.3 31.8% 91.4%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 218.3 17.3% 40.8%;
+    --accent: 214.3 94.6% 92.7%;
+    --accent-foreground: 224.4 64.3% 32.9%;
+    --destructive: 0 73.7% 41.8%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 217.5 11.5% 59.2%;
+    --ring: 224.3 76.3% 48%;
+    --radius: 0.375rem;
+  }
+  .dark {
+    --background: 220 48.8% 8.4%;
+    --foreground: 214.3 31.8% 91.4%;
+    --card: 221.4 46% 12.4%;
+    --card-foreground: 214.3 31.8% 91.4%;
+    --popover: 221.4 46% 12.4%;
+    --popover-foreground: 214.3 31.8% 91.4%;
+    --primary: 213.1 93.9% 67.8%;
+    --primary-foreground: 220 48.8% 8.4%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 214.3 31.8% 91.4%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 226.2 57% 21%;
+    --accent-foreground: 213.3 96.9% 87.3%;
+    --destructive: 0 90.6% 70.8%;
+    --destructive-foreground: 220 48.8% 8.4%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 216 14.2% 41.6%;
+    --ring: 213.1 93.9% 67.8%;
+  }
+  body { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+}

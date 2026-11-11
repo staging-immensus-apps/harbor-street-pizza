@@ -1,0 +1,49 @@
+/* Bloom — Bright and friendly. Round, playful, a little loud. */
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700;800&display=swap');
+
+@layer base {
+  :root {
+    --background: 22.5 100% 98.4%;
+    --foreground: 341.3 23.5% 13.3%;
+    --card: 0 0% 100%;
+    --card-foreground: 341.3 23.5% 13.3%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 341.3 23.5% 13.3%;
+    --primary: 343.2 64.7% 46.7%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 346.4 84.6% 94.9%;
+    --secondary-foreground: 343.6 55.9% 23.1%;
+    --muted: 346.7 36% 95.1%;
+    --muted-foreground: 344 14% 42%;
+    --accent: 39.5 100% 92%;
+    --accent-foreground: 38.7 100% 21%;
+    --destructive: 4.2 76.5% 40%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 346.7 39.1% 91%;
+    --input: 344.3 11.4% 60.6%;
+    --ring: 343.2 64.7% 46.7%;
+    --radius: 1rem;
+  }
+  .dark {
+    --background: 340 20.9% 8.4%;
+    --foreground: 346.2 61.9% 95.9%;
+    --card: 320 20% 11.8%;
+    --card-foreground: 346.2 61.9% 95.9%;
+    --popover: 320 20% 11.8%;
+    --popover-foreground: 346.2 61.9% 95.9%;
+    --primary: 346 100% 73.9%;
+    --primary-foreground: 341.4 52.7% 10.8%;
+    --secondary: 342.5 26.1% 18%;
+    --secondary-foreground: 346.2 61.9% 95.9%;
+    --muted: 338.8 22.7% 14.7%;
+    --muted-foreground: 345 20.3% 69%;
+    --accent: 40 47% 16.3%;
+    --accent-foreground: 39.2 100% 80.2%;
+    --destructive: 3.8 100% 69%;
+    --destructive-foreground: 340 20.9% 8.4%;
+    --border: 341.3 16% 19.6%;
+    --input: 344.2 8.8% 42.2%;
+    --ring: 346 100% 73.9%;
+  }
+  body { font-family: 'Bricolage Grotesque', system-ui, sans-serif; }
+}

@@ -1,0 +1,701 @@
+name: PR check
+
+# FIXED — static, fast checks that run on every PR and gate merging. Needs
+# no secrets. Branch protection on `main` requires the status named `check`; the builder
+# worker posts the same status name for its own PRs, so one status, two producers.
+#
+# THIS FILE IS SEEDED INTO EVERY APP, AND AN APP HOLDS NO TEST HARNESS (CLAUDE.md §6). So there,
+# `check` runs its static checks, and `acceptance` type-checks, builds and says its suites did not run.
+#
+# Every step below is a rule from CLAUDE.md §4 or an incident from an earlier app turned into
+# a grep. Step comments name the rule number or the incident.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # MERGE QUEUE, added 2026-10-07 ahead of the ruleset rule being switched on.
+  # A queued commit is NOT a pull_request event. Without this trigger the required contexts
+  # `check` and `acceptance` never report for a queue entry, and every merge hangs for ever —
+  # which is the same failure as a required check that never reports, one layer along. This
+  # trigger is therefore a PRECONDITION of enabling the queue, not a companion to it, and it is
+  # safe to carry while the queue is off: with no queue, no merge_group event is ever produced.
+  merge_group:
+  workflow_dispatch:
+
+# Supersede, but never on the default branch. A newer commit on the SAME pull request makes an
+# older run's verdict worthless, and this job is expensive (~500 suite executions,
+# ~36 min) — three ran at once on one branch on 2026-09-25.
+#
+# Both lines below are load-bearing. `group` keys on the ref and not on the workflow alone, or
+# one pull request's push would cancel another pull request's run. `cancel-in-progress` is a
+# guard rather than a bare `true` because a run on the default branch is not a superseded
+# attempt at a verdict — it IS the record that a merge was green. A cancelled run reports NO
+# verdict, and a required check that names no condition is the "gate that cries wolf" shape.
+# No verdict is the honest answer for exactly one condition — "a newer commit on this same
+# pull request replaced this one" — and for nothing else.
+#
+# This workflow has no `push:` trigger, so today the guard bites only on a workflow_dispatch
+# aimed at `main`. It is written anyway: adding `push:` is one line, and without the guard that
+# line would start destroying merge evidence silently.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # THIS JOB INSTALLS NOTHING, AND THAT IS WHY THE BUDGET IS SMALL.
+    # Every step is `node --check`, a grep, or a self-test importing `node:` builtins only —
+    # seconds of work. It used to `npm ci` first with a 5-minute budget, and one slow
+    # registry night cancelled seven of nine attempts: a cancelled required check names no
+    # condition and looks exactly like a real failure, so nothing in the repo could merge.
+    # 10 minutes against seconds of work is the headroom; a hung step still fails in bounded
+    # time but is never the thing that fails. Restore an install and this budget together.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # No `cache: 'npm'`: there is no install to feed. Kept for the pinned Node version.
+      #
+      # `package-manager-cache: false` is not decoration. From setup-node v5 caching turns
+      # ITSELF on whenever package.json names npm in `packageManager` or
+      # `devEngines.packageManager` — and in a generated app package.json is GENERATED, so
+      # without this line whether this job caches would be decided by the app rather than by
+      # the template, in the one job whose whole design is "installs nothing, caches nothing".
+      # Every setup-node step says what it caches, one way or the other:
+      # `setupNodeCacheProblems()` in scripts/harness-acceptance.js.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: JS syntax check
+        # `node --check` parses without executing: typos, unterminated strings, orphan
+        # `} catch`. Only directories that exist are walked — the template starts sparse.
+        run: |
+          set -e
+          fail=0
+          dirs=''
+          # `kits` too: in this repository a kit's code sits under kits/<kit>/ until the platform copies
+          # it into an app, and each kit's package.json says `"type": "module"` so it parses as ESM here.
+          for d in resources lib routes scripts kits; do [ -d "$d" ] && dirs="$dirs $d"; done
+          [ -n "$dirs" ] || { echo "nothing to check yet"; exit 0; }
+          while IFS= read -r f; do
+            if ! node --check "$f" 2>/tmp/err; then
+              echo "❌ $f"; cat /tmp/err; fail=1
+            fi
+          done < <(find $dirs -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \))
+          [ $fail -eq 0 ]
+
+      - name: Secret scan
+        # Real key values must never land in tracked files. Placeholders and code that
+        # references a prefix (a `whsec_` regex) don't match: the pattern demands 20+
+        # payload characters after the prefix, and a non-word character before it so that
+        # `secure_random_bytes…` does not read as an `re_` key.
+        run: |
+          set -e
+          hits=$(git ls-files | xargs grep -lE '(^|[^A-Za-z0-9_])(sk_live_|sk_test_|whsec_|re_|GOCSPX-|sk-ant-api03-|ghp_|github_pat_)[A-Za-z0-9_-]{20,}' 2>/dev/null || true)
+          if [ -n "$hits" ]; then
+            echo "❌ Real-looking secret values found in tracked files:"
+            echo "$hits"
+            echo
+            echo "Secrets are written to CONFIG.env at deploy time and read via lib/config.js getters."
+            exit 1
+          fi
+          echo "✅ no key values in tracked files"
+
+      - name: Private key scan
+        # The prefix scan cannot see key material — no prefix appears in a PEM block or a
+        # service-account JSON. In an earlier app a Google service-account key was staged
+        # for commit and would have merged green; the only remedy after that is rotation
+        # plus a history rewrite. Two independent signals, either enough: a PEM BEGIN header
+        # followed by an actual base64 body, or "type": "service_account" together with a
+        # populated "private_key". Both demand payload, so prose about keys does not trip
+        # them — the patterns use character classes precisely so this file does not match
+        # itself.
+        run: |
+          set -e
+          cat > /tmp/keyscan.mjs <<'NODE'
+          import { readFileSync } from 'node:fs'
+          import { execSync } from 'node:child_process'
+          const pem = /-----BEGIN[ A-Z]*PRIVATE[ ]KEY-----(?:\\n|\r?\n)[A-Za-z0-9+/]{40}/
+          const saType = /"type"[ ]*:[ ]*"service[_]account"/
+          const saKey = /"private[_]key"[ ]*:[ ]*"[^"]{40}/
+          const hits = []
+          for (const f of execSync('git ls-files -z').toString().split('\0').filter(Boolean)) {
+            let text
+            try { text = readFileSync(f, 'utf8') } catch { continue }
+            if (pem.test(text)) hits.push(f + ' — PEM private key block')
+            else if (saType.test(text) && saKey.test(text)) hits.push(f + ' — service-account JSON with private_key')
+          }
+          if (hits.length) {
+            console.error('❌ Private key material found in tracked files:')
+            for (const h of hits) console.error('  ' + h)
+            console.error('')
+            console.error('Key files never ship. `git rm --cached` the file, add it to .gitignore, rotate the key.')
+            process.exit(1)
+          }
+          console.log('✅ no private key material in tracked files')
+          NODE
+          node /tmp/keyscan.mjs
+
+      - name: Private key scan self-test
+        # The step above only proves a clean tree is clean — it stays green if the regex is
+        # ever "simplified" into something that matches nothing. Run the SAME scanner against
+        # a synthesized service-account key (random bytes, never a real key) and against
+        # prose about keys; fail if either verdict is wrong. Assembled from variables on
+        # purpose: spelling the fixture out literally would put a matching JSON in THIS file.
+        run: |
+          set -e
+          work=$(mktemp -d)
+          git init -q "$work"
+          body=$(head -c 400 /dev/urandom | base64 | tr -d '\n')
+          kt=service_account
+          pk=private_key
+          hdr='-----BEGIN PRIVATE KEY-----'
+          ftr='-----END PRIVATE KEY-----'
+          printf '{\n  "type": "%s",\n  "%s": "%s\\n%s\\n%s\\n"\n}\n' "$kt" "$pk" "$hdr" "$body" "$ftr" > "$work/synth-sa.json"
+          cat > "$work/PROSE.md" <<'PROSE'
+          Prose about keys must stay clean: a service-account JSON carries a "type" of
+          service_account plus a "private_key" field, and a PEM file opens with a BEGIN
+          PRIVATE KEY header. No payload follows any of it, so nothing here is a secret.
+          PROSE
+          git -C "$work" add -A
+          out=$(cd "$work" && node /tmp/keyscan.mjs 2>&1) && rc=0 || rc=$?
+          echo "$out" | sed 's/^/    | /'
+          if [ "${rc:-0}" -eq 0 ]; then
+            echo "❌ self-test: the scanner PASSED a synthesized service-account key. Fix the patterns; do not delete this test."
+            exit 1
+          fi
+          printf '%s' "$out" | grep -q 'synth-sa\.json' || { echo "❌ self-test: scanner failed but never named synth-sa.json."; exit 1; }
+          if printf '%s' "$out" | grep -q 'PROSE\.md'; then
+            echo "❌ self-test: scanner flagged prose ABOUT keys — a gate that cries wolf gets muted."
+            exit 1
+          fi
+          rm -rf "$work"
+          echo "✅ self-test: catches a synthesized key, ignores prose about keys"
+
+      - name: Deploy-time and BUILT files are not tracked
+        # CONFIG.env / .env are written by the worker at deploy time; web/ is vite output
+        # built before every deploy. None of them ship in git.
+        run: |
+          set -e
+          bad=$(git ls-files | grep -E '^(CONFIG\.env|\.env(\..*)?|web/.*)$' || true)
+          if [ -n "$bad" ]; then
+            echo "❌ Tracked files that must never be committed:"; echo "$bad"
+            echo "Add to .gitignore and git rm --cached."
+            exit 1
+          fi
+          echo "✅ CONFIG.env, .env and web/ stay out of git"
+
+      - name: Rule 20 — no statusCode 401
+        # Auth failures throw a Response (403); Harper adds WWW-Authenticate: Basic to every
+        # 401 and the browser pops its basic-auth dialog.
+        run: |
+          set -e
+          bad=$(grep -rEn 'statusCode\s*[:=]\s*401' resources/ lib/ routes/ $(ls -d kits/*/resources kits/*/lib kits/*/routes 2>/dev/null) 2>/dev/null | grep -v 'err?.statusCode === 401' | grep -v '// ' || true)
+          if [ -n "$bad" ]; then
+            echo "❌ statusCode: 401 assignments:"; echo "$bad"
+            echo "Auth failures throw a Response 403 with code 'auth_required' (lib/auth.js)."
+            exit 1
+          fi
+          echo "✅ no 401 status assignments"
+
+      - name: Rule 21 — never fastify.head()
+        # Measured on Harper 5.2.13: one hand-registered HEAD for a path that also had a GET made
+        # the whole routes plugin fail to load — 404 on every route plus one cryptic 500.
+        # Fastify adds HEAD to every GET itself.
+        run: |
+          set -e
+          bad=$(grep -rEn 'fastify\.head\s*\(' routes/ $(ls -d kits/*/routes 2>/dev/null) 2>/dev/null || true)
+          if [ -n "$bad" ]; then echo "❌ fastify.head() registered by hand:"; echo "$bad"; exit 1; fi
+          echo "✅ no hand-registered HEAD routes"
+
+      - name: Rule 23 — nothing under /.well-known/
+        # Fabric's ACME component answers /.well-known/acme-challenge/* on every cluster with
+        # a custom hostname. A route there breaks certificate issuance and renewal.
+        run: |
+          set -e
+          bad=$(grep -rEn "well-known" routes/ resources/ $(ls -d kits/*/routes kits/*/resources 2>/dev/null) 2>/dev/null | grep -v '^\S*:[0-9]*:\s*//' || true)
+          if [ -n "$bad" ]; then echo "❌ /.well-known/ referenced in app code:"; echo "$bad"; exit 1; fi
+          echo "✅ /.well-known/ is left to Fabric"
+
+      - name: Rule 18 — only lib/db.js reaches the table set
+        # One database per app, chosen at DEPLOY TIME: lib/db.js
+        # binds the table set from configuration and everything else reads db.<Table>.
+        #
+        # THE @export HALF OF THIS STEP IS GONE (2026-11-02, the prohibition was removed
+        # platform-wide).
+        #
+        # THIS GREP IS DELIBERATELY NARROWER THAN THE RULE, and db-module-acceptance is the
+        # authority. It matches only an import of those names from harperdb, which is
+        # unambiguous. It does NOT look for `tables.X`, because this workflow is seeded into
+        # every app and `tables` is an ordinary noun — a restaurant app's own `const tables`
+        # would red somebody's build over a word they chose themselves, which is the cry-wolf
+        # shape. The suite carries that half with the exemption a shell grep cannot express,
+        # plus the multi-line import a line-based grep cannot see.
+        run: |
+          set -e
+          fail=0
+          bad=$(grep -rEn 'import[^;]*\{[^}]*\b(tables|databases)\b[^}]*\}[^;]*from[[:space:]]*.harperdb' resources/ lib/ routes/ $(ls -d kits/*/resources kits/*/lib kits/*/routes 2>/dev/null) 2>/dev/null | grep -vE '^lib/+db\.js:' | grep -v '^\S*:[0-9]*:\s*//' || true)
+          if [ -n "$bad" ]; then echo "❌ tables/databases imported from harperdb outside lib/db.js:"; echo "$bad"; fail=1; fi
+          [ $fail -eq 0 ] && echo "✅ db.<Table> only"
+
+      - name: Rule 8 — no createBlob
+        # In an earlier app a row was committed, the blob never landed, every read path ENOENT. Blobs are
+        # `new Blob([buf], {type})` with verify-on-write.
+        run: |
+          set -e
+          bad=$(grep -rEn '\bcreateBlob\s*\(' resources/ lib/ routes/ $(ls -d kits/*/resources kits/*/lib kits/*/routes 2>/dev/null) 2>/dev/null || true)
+          if [ -n "$bad" ]; then echo "❌ createBlob() used:"; echo "$bad"; exit 1; fi
+          echo "✅ no createBlob"
+
+      - name: Rule 24 — no named sync-spawn imports in component modules
+        # Harper's ESM linker hands resources/ and lib/ a shimmed node:child_process
+        # without execFileSync/spawnSync; one named import that fails to link takes every
+        # route on the cluster down with ResourceLoadError. Sync spawn goes through
+        # createRequire or a CommonJS helper.
+        run: |
+          set -e
+          bad=$(grep -rEnz "import\s*\{[^}]*\b(execFileSync|spawnSync|execSync)\b[^}]*\}\s*from\s*['\"](node:)?child_process['\"]" resources/ lib/ routes/ $(ls -d kits/*/resources kits/*/lib kits/*/routes 2>/dev/null) 2>/dev/null | tr '\0' '\n' || true)
+          if [ -n "$bad" ]; then echo "❌ named sync-spawn import from child_process in a component module:"; echo "$bad"; exit 1; fi
+          echo "✅ no named sync-spawn imports in resources/ lib/ routes/"
+
+      - name: Rule 5 — routes/ never reaches harperdb
+        # In an earlier app, one Fastify route importing `harperdb` (directly or through
+        # lib/) 404'd every Fastify route. Walks the relative import graph from routes/*.js.
+        run: |
+          set -e
+          [ -d routes ] || { echo "no routes/ yet"; exit 0; }
+          cat > /tmp/routes-graph.mjs <<'NODE'
+          import { readFileSync, readdirSync, existsSync } from 'node:fs'
+          import { resolve, dirname } from 'node:path'
+          const IMPORT = /(?:import|export)\s[^'"]*?from\s*['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\)|require\(\s*['"]([^'"]+)['"]\s*\)/g
+          const seen = new Set(); const bad = []
+          function walk (file, chain) {
+            if (seen.has(file)) return
+            seen.add(file)
+            const src = readFileSync(file, 'utf8')
+            for (const m of src.matchAll(IMPORT)) {
+              const spec = m[1] ?? m[2] ?? m[3]
+              if (spec === 'harperdb' || spec.startsWith('harperdb/')) { bad.push([...chain, file].join(' -> ') + ` imports ${spec}`); continue }
+              if (!spec.startsWith('.')) continue
+              let target = resolve(dirname(file), spec)
+              for (const cand of [target, target + '.js', target + '.mjs', target + '/index.js']) {
+                if (existsSync(cand) && !cand.endsWith('/')) { walk(cand, [...chain, file]); break }
+              }
+            }
+          }
+          for (const f of readdirSync('routes').filter(f => /\.(m?js)$/.test(f))) walk(resolve('routes', f), [])
+          if (bad.length) { console.error('❌ routes/ reaches harperdb:'); for (const b of bad) console.error('  ' + b); process.exit(1) }
+          console.log(`✅ routes/ import graph (${seen.size} files) never reaches harperdb`)
+          NODE
+          node /tmp/routes-graph.mjs
+
+      - name: package.json scripts point at real files
+        # The harness is the one exemption: an app's package.json keeps its `suites` script, and the
+        # platform copies the runner into the build workspace (CLAUDE.md §6). In the template the
+        # runner is held by the self-test step below, which reds when the file is gone.
+        run: |
+          set -e
+          fail=0
+          for path in $(node -e "const p=require('./package.json'); for (const v of Object.values(p.scripts||{})) { const m=v.match(/node\s+([^\s]+\.js)/); if (m) console.log(m[1]) }"); do
+            case "$path" in scripts/run-suites.js|scripts/probe/*) continue ;; esac
+            if [ ! -f "$path" ]; then echo "❌ package.json script references missing file: $path"; fail=1; fi
+          done
+          [ $fail -eq 0 ] && echo "✅ every node script points at a file"
+
+      - name: The provenance record names the repository this job is running in
+        id: provenance
+        # UNGATED ON PURPOSE, AND THE ONLY CHECK IN THIS FILE HELD AGAINST A FACT THE TREE CANNOT
+        # WRITE.
+        #
+        # The step below is scoped `if: github.repository == '<a literal>'`, and
+        # `scripts/harness-acceptance.js`'s `manifestGuardProblems` requires that literal to equal
+        # `.immensus/template.json`'s `template` field. Two records, both in the tree, compared to
+        # each other — so a rename invalidates both at once, they still agree, and the gate reports
+        # green while the step below never runs. That is what happened, and `--check` was skipped on
+        # every pull request. `manifestGuardProblems`' own refusal message had predicted
+        # it in as many words and still could not see it.
+        #
+        # So this pins ONE end of that pair to `github.repository`, which comes from GitHub and not
+        # from any file. `if:` == field (already) plus field == repository (here) gives `if:` ==
+        # repository, and no two-of-three can agree their way out of it.
+        #
+        # IT HAS NO `if:` BECAUSE IT MUST NOT BE SCOPED BY THE THING IT IS CHECKING, and it needs
+        # none: `--provenance` is inert in a generated app by its own verdict, on the OWNER of the
+        # repository the manifest names — templates live in the platform org and apps in
+        # `immensus-apps`, which is the split `seedFromTemplate` itself refuses on. Adding an `if:`
+        # here is refused by `provenanceStepProblems`, including a narrowing one: narrowing is
+        # exactly the hazard, because the states it would subtract are the states this exists for.
+        #
+        # The `[ -f ]` is not caution either. An app may delete this script, and reding an app's
+        # own CI because it exercised that permission is a mistake.
+        run: |
+          set -e
+          if [ -f scripts/template-manifest.js ]; then
+            node scripts/template-manifest.js --provenance
+          else
+            echo "scripts/template-manifest.js is not in this tree, so nothing here records a provenance claim to check."
+          fi
+
+      - name: Template manifest matches the tree (TEMPLATE REPOSITORY ONLY)
+        id: manifest
+        # THE ONE CHECK IN THIS REPO THAT IS SCOPED BY REPOSITORY, and the `if:` is the point of
+        # it rather than an optimisation.
+        #
+        # `.immensus/template.json` records the git blob sha of every file the template SEEDS.
+        # In this repository that record has to match the tree in the PR that changes it, or
+        # every app seeded afterwards carries a lie about its own origin. In a GENERATED APP the
+        # same comparison must never run: the template pin is withdrawn — an app is
+        # its own independent thing, fully modifiable — so a difference there is the app exercising a permission, not a defect. The gate used
+        # to be `template-drift-acceptance`, a SUITE, which is precisely how it reached every
+        # app: scripts/run-suites.js discovers suites by name, so Tier A ran it against the
+        # founder's own code and no stage could clear the red.
+        #
+        # Scoped by `github.repository`, not by anything in the tree, because the tree is the
+        # thing an app may change — a marker file or a package name would be a condition the
+        # subject of the check controls. `scripts/template-manifest.js` is not named by the
+        # suite convention, so nothing else can discover and run it either.
+        #
+        # The self-test runs first and in the same step: `--check` is "serialise and compare",
+        # the shape that quietly degrades into always-OK, and a control proving it still says no
+        # is the only thing between this check and that.
+        #
+        # AND THE CONDITION ITSELF WAS HELD HONEST BY NOTHING. It names this repository
+        # by a literal; `scripts/harness-acceptance.js`'s `manifestGuardProblems` requires that
+        # literal to equal `.immensus/template.json`'s `template` field. Both are in the tree and
+        # they were compared only to each other, so when this repository was renamed
+        # `app-template` -> `web-app-template` they stayed in agreement, the gate stayed green, and
+        # this step was `skipped` on every pull request for a week. The "provenance record" step
+        # ABOVE is what closes that: it holds the manifest's field against `github.repository`, so
+        # the chain reaches a fact nothing in this tree can write. Do not make this `if:` read from
+        # the tree to "fix" it — the literal is the property the paragraph above is about.
+        if: github.repository == 'ImmensusApp/web-app-template'
+        run: |
+          set -e
+          node scripts/template-manifest.js --self-test
+          node scripts/template-manifest.js --check
+
+      - name: Is the test harness in this repository?
+        id: harness
+        # THE TEST HARNESS IS NOT IN AN APP'S REPOSITORY, ON PURPOSE (CLAUDE.md §6), and this workflow
+        # is seeded into every app, so a step that needs the harness has to ask. An app's repository
+        # is private to its customer and this workflow uses no secrets, so CI there has no way to
+        # fetch it.
+        #
+        # THE TEMPLATE IS THE ONE PLACE WHERE ABSENCE IS A DEFECT, because its own checks run the
+        # harness, so the answer there is a red rather than a skip. That is why this reads
+        # `$GITHUB_REPOSITORY` and not only the tree: on the file alone, deleting the harness from
+        # the template would turn off its suites and leave every check green. `harness-acceptance`
+        # drives this script over all four states and holds the literal to
+        # `.immensus/template.json`; the provenance step holds that record to the repository.
+        #
+        # The output is `absent`, read with `!= 'true'`, so anything but a positive answer runs the
+        # step that reads it, the same direction as the draft guard below. An app that does carry
+        # the runner, such as one seeded before the harness left, still runs it here.
+        run: |
+          if [ -f scripts/run-suites.js ]; then
+            absent=false
+          elif [ "$GITHUB_REPOSITORY" = 'ImmensusApp/web-app-template' ]; then
+            echo "❌ scripts/run-suites.js is missing from the template repository, whose own checks run it."
+            exit 1
+          else
+            absent=true
+            echo "scripts/run-suites.js is not in this repository, as expected in an app, so the steps that need it are skipped."
+          fi
+          echo "absent=$absent" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Acceptance-suite runner self-test
+        # The runner is what makes the `acceptance` job below mean something, and its value
+        # is entirely in the NO. This drives it against a synthesized fixture repo: a broken
+        # suite must fail it, a non-suite script must never run, empty discovery must not
+        # read as success, a git-reading suite and a clock-dependent suite must be rejected.
+        if: steps.harness.outputs.absent != 'true'
+        run: node scripts/run-suites.js --self-test
+
+      - name: deploy-shared.yml secret lists agree
+        # "Write CONFIG.env from secrets" names every secret TWICE — in the step's env: map
+        # and in the `for k in` list that writes the file. A key in only one list fails
+        # silently: env-only never reaches CONFIG.env, for-only writes an empty value.
+        run: |
+          set -e
+          F=.github/workflows/deploy-shared.yml
+          awk '/- name: Write CONFIG\.env from secrets/{f=1} f&&/^        run: \|/{exit} f' "$F" \
+            | sed -n 's/^          \([A-Z][A-Z0-9_]*\):.*/\1/p' | sort -u > /tmp/env_keys.txt
+          awk '/for k in /{f=1} f{print; if(/; do/) exit}' "$F" \
+            | sed 's/.*for k in //; s/; do.*//; s/\\//g' | tr -s ' \t' '\n' | sed '/^$/d' | sort -u > /tmp/for_keys.txt
+          if [ ! -s /tmp/env_keys.txt ] || [ ! -s /tmp/for_keys.txt ]; then
+            echo "❌ Could not extract either secret list from $F — the step's shape changed; re-point this guard rather than deleting it."
+            exit 1
+          fi
+          only_env=$(comm -23 /tmp/env_keys.txt /tmp/for_keys.txt)
+          only_for=$(comm -13 /tmp/env_keys.txt /tmp/for_keys.txt)
+          if [ -n "$only_env" ] || [ -n "$only_for" ]; then
+            echo "❌ deploy-shared.yml's two secret lists have drifted:"
+            [ -n "$only_env" ] && echo "$only_env" | sed 's/^/  declared in env: but never written: /'
+            [ -n "$only_for" ] && echo "$only_for" | sed 's/^/  written but never declared in env:: /'
+            exit 1
+          fi
+          echo "✅ deploy-shared.yml secret lists match ($(wc -l < /tmp/env_keys.txt | tr -d ' ') keys)"
+
+  acceptance:
+    # Type-checks and builds, then runs every hermetic suite package.json names by convention
+    # (*-acceptance, *-probe, check-*) WHERE THE RUNNER IS PRESENT. In an app it is not, so there
+    # this job proves the app compiles and builds, skips the suites step and says so. A SEPARATE
+    # job so it reports as its own status; branch protection may require it alongside `check`.
+    # This job genuinely needs the install: suites reach the FIXED lib through the probe loader.
+    # 25 minutes covers a cold install, the core's suite set and
+    # the three kit trees below — about 50 s, 70 s, 55 s and 70 s on a 2026 Mac, several times that
+    # on a CI runner — with room to spare (an earlier app: 74 suites × 3 clock instants in 202 s).
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Granted at the JOB level and only on this job: `check` reads no API and keeps the
+    # organisation's read-only default. `pull-requests: read` is what `gh api …/pulls/<n>` needs
+    # for the draft resolution below, and `github.token` is the automatic token — this workflow
+    # still uses no repository secrets, which is what §2's "no secrets" means.
+    #
+    # A job-level block REPLACES the default rather than adding to it, which is why `contents:
+    # read` is here too: without it the checkout loses its own grant. If the read is ever refused
+    # the resolution falls open to RUNNING the suites, and the measured draft saving is silently
+    # gone while the badge still means something. That is the right failure direction and the
+    # wrong thing to discover by accident, which is why `prCheckDraftProblems` in
+    # harness-acceptance asserts this block.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      # Three registry round trips the install does not need: no audit, no funding query,
+      # cached tarballs preferred over revalidation.
+      - run: npm ci --prefer-offline --no-audit --fund=false
+
+      - name: Type-check and build the frontend
+        # `tsc --noEmit` and `vite build` join this job. Both activate the
+        # moment the Vite package lands (vite.config.ts is SEEDED); until then there is
+        # nothing to build and the step says so rather than failing on an absent tool.
+        run: |
+          set -e
+          if [ -f tsconfig.json ] && [ -x node_modules/.bin/tsc ]; then npx tsc --noEmit; else echo "no tsconfig.json / tsc yet — skipped"; fi
+          if [ -f vite.config.ts ] && [ -x node_modules/.bin/vite ]; then npx vite build; else echo "no vite.config.ts / vite yet — skipped"; fi
+
+      # =================================================================================
+      # THE DRAFT GUARD. ITS ONE RULE: A GUARD THAT DECIDES WHETHER TO RUN A REQUIRED CHECK
+      # MUST FAIL TOWARD RUNNING IT.
+      # =================================================================================
+      #
+      # WHAT THE GUARD IS FOR, unchanged and still measured (2026-10-07): the expensive step does not
+      # run while the pull request is a draft — 21.8% of this repo family's acceptance compute was spent
+      # on drafts, and 7 of the 12 most recent merged pull requests opened as one. GitHub will not
+      # merge a draft, and marking one ready fires `ready_for_review`, so the full set runs on a
+      # head that can actually land. This repository was the pilot.
+      #
+      # WHAT WENT WRONG, read from the API rather than reasoned about. The condition
+      # decided from `github.event.pull_request.draft`, a snapshot of whenever the EVENT was
+      # generated. A push and a `gh pr ready` within about two seconds — the ordering §5's own
+      # merge checklist produces — leave the `ready_for_review` runs on the PREVIOUS sha, where
+      # the `concurrency` group above cancels them. The only run attached to the HEAD sha
+      # then carries a `synchronize` payload in which `draft` is STILL TRUE. So the suites skip
+      # and `acceptance` reports success, on a pull request that is MERGEABLE / CLEAN. Four live
+      # reproductions in one day across four repositories; two merges went in on it
+      # in other repositories, and neither merge commit carries a
+      # check run of its own because `pr-check` does not fire on a push to `main`. THIS
+      # repository was audited and merged nothing on a skipped set, so here it is a hole rather
+      # than an incident — which is the cheapest moment to close one.
+      #
+      # IT IS WORSE THAN A CANCELLED CHECK AND THAT IS WHY IT NEEDED THIS SHAPE.
+      # A cancelled required check names no condition, and its mitigation is that a reader checks
+      # the CONCLUSION rather than the colour. That mitigation cannot reach this case: the
+      # conclusion genuinely is `success`. The only way to see it is to open the job and read
+      # which steps ran.
+      #
+      # THE FIX IS TWO THINGS AND NEITHER IS SUFFICIENT ALONE.
+      #
+      #   1. THE INPUT. The decision is made against the pull request AS IT IS, by one API read,
+      #      and never from the event payload. It is resolved HERE, after the install and the
+      #      build, on purpose: every second between the event and the read is a second in which
+      #      GitHub has processed a `ready_for_review` the payload predates. Nothing is paid for
+      #      the lateness — the install, the typecheck and the build already ran on drafts.
+      #
+      #   2. THE DIRECTION. `!= 'true'` and never `== 'false'`. ONLY a positive, live `true`
+      #      skips; everything else runs. A skipped resolve step (a `workflow_dispatch`, a
+      #      `merge_group` entry) leaves the output empty and `'' != 'true'`, so the suites run.
+      #      A failed read writes `false` and says so loudly. An unparseable answer writes
+      #      `false`. There is no path to a skip that is not an affirmative live answer, which
+      #      is the whole of the rule at the top of this block.
+      #
+      # THE WINDOW IS NARROWED AND NOT CLOSED, said outright rather than left to be discovered,
+      # and this paragraph is a READING of GitHub's behaviour rather than a measurement — tier 3
+      # (§6), where everything else in this block is tier 1. Do not drop that label in a tidy-up:
+      # it is the one claim here that no check holds, and an unlabelled claim beside measured
+      # ones reads as measured.
+      #
+      # A pull request that leaves draft AFTER this step has read still has a job that skipped
+      # the suites. For that to matter it has to be the verdict on the HEAD sha, and two things
+      # have to hold at once: this run resolved `true`, and nothing later ran on that same head.
+      # The `ready_for_review` event itself produces such a later run, so the second condition
+      # needs that run to be cancelled — and the only thing that cancels it is a newer run in
+      # this `concurrency` group, which comes from a push, which MOVES THE HEAD. The stale
+      # verdict is then on a sha that cannot merge. Nobody has driven GitHub's event pipeline at
+      # a chosen delay to measure which sha a `ready_for_review` payload carries, and no hermetic
+      # suite can — that is an assertion about somebody else's system. What IS measured is the
+      # direction, by the gate that executes this script: whatever lands in the gap runs the
+      # suites rather than skipping them, so a wrong reading here costs a slower run and not a
+      # green badge over nothing.
+      #
+      # TWO THINGS FROM THE OLD SHAPE SURVIVE AND ARE STILL LOAD-BEARING. The JOB still runs and
+      # still reports its status name, because a required status check that never reports leaves
+      # a pull request waiting for it forever — which is why this is a step condition and not a
+      # `paths:` or a job-level `if:`. And a manual run must always run the suites: that was
+      # `event_name` first in the old condition and it is the `if:` on the resolve step now, so
+      # `gh workflow run pr-check.yml --ref <branch>` — the workaround this defect was found
+      # with — still works.
+      #
+      # EVERY GITHUB EXPRESSION IS IN `env:` AND THE SCRIPT IS PURE SHELL. That is not style. It
+      # is what lets `prCheckDraftProblems` extract this script and EXECUTE it, under the same
+      # flags GitHub runs it with, against a stubbed `gh` — so "falls open" is a measured
+      # property of these lines rather than a sentence in this comment. It also keeps a pull
+      # request's own strings out of a command line. And the `env:` is the STEP's, at column 8:
+      # `jobs.<id>.env` may not read `github.event`, which is the unparseable-workflow defect
+      # that `badEnvContexts` measures.
+      - name: Resolve the live draft state
+        id: draft
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          PAYLOAD_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          live=''
+          why='the event carried no pull request number'
+          if [ -n "${PR:-}" ]; then
+            # STDOUT ONLY into the value, stderr to a file. Merging them with `2>&1` means a
+            # harmless notice on a SUCCESSFUL call lands in `$live`, which is then neither `true`
+            # nor `false`, which falls open to running the suites — safe, and the draft saving
+            # silently gone for a warning nobody asked about. The gate drives that case.
+            #
+            # The read stays INSIDE the `if` condition: a command substitution there is exempt
+            # from `set -e`, which is the only reason a failed read can be classified rather
+            # than aborting the step and skipping every step after it. Collapsing it into a bare
+            # assignment reads as a tidy-up and reds `acceptance` on a transient 5xx. The gate
+            # drives that case too.
+            err="$(mktemp)"
+            if live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '.draft' 2>"$err")"; then
+              why="the API answered \"$live\", which is neither true nor false"
+            else
+              why="gh api failed: $(cat "$err")"
+              live=''
+            fi
+            rm -f "$err"
+          fi
+          case "$live" in
+            true|false)
+              # Only worth saying when there IS a live answer to disagree with: on the two
+              # fall-open paths `live` is a default rather than a reading, and calling that
+              # "the race" would be this file inventing a diagnosis.
+              if [ "$live" != "${PAYLOAD_DRAFT:-}" ]; then
+                echo "the event payload said draft=${PAYLOAD_DRAFT:-<none>} and the pull request says draft=$live — that is the race, and the live answer is the one that decides"
+              fi
+              ;;
+            *)
+              live=false
+              # `$why` carries `gh`'s own output, so it goes to the LOG and not to the step
+              # summary. `gh` does not print a token and `GH_TOKEN` is never echoed, but the
+              # summary is the surface a reader skims and the cheapest thing to keep generic.
+              echo "⚠️ the live draft state could not be read ($why)."
+              echo "⚠️ the live draft state could not be read, so the acceptance suites are RUNNING — a guard that cannot decide must never skip a required check. The reason is in this job's log. The draft saving is lost on this run only." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
+          echo "draft=$live" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Say what a draft badge does not cover
+        # A summary may not count what an exit status did not say. A green badge on a draft ran
+        # the cheap checks only, and says so where the badge is read rather than in a log.
+        #
+        # Keyed on the SAME step output as the skip, with the opposite comparison. A caveat keyed
+        # on the event payload beside a skip keyed on the live read is the state where the badge
+        # says the suites ran and the summary says they did not, or the reverse — and the summary
+        # is the half nobody reads.
+        if: steps.draft.outputs.draft == 'true'
+        run: |
+          msg="⚠️ DRAFT: the acceptance suites did NOT run in this job. Cheap checks only. Mark the pull request ready for review and the full set runs on that head, which is the only head that can merge."
+          echo "$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Is the test harness in this repository?
+        id: harness
+        # THE TEST HARNESS IS NOT IN AN APP'S REPOSITORY, ON PURPOSE (CLAUDE.md §6), and this workflow
+        # is seeded into every app, so a step that needs the harness has to ask. An app's repository
+        # is private to its customer and this workflow uses no secrets, so CI there has no way to
+        # fetch it.
+        #
+        # THE TEMPLATE IS THE ONE PLACE WHERE ABSENCE IS A DEFECT, because its own checks run the
+        # harness, so the answer there is a red rather than a skip. That is why this reads
+        # `$GITHUB_REPOSITORY` and not only the tree: on the file alone, deleting the harness from
+        # the template would turn off its suites and leave every check green. `harness-acceptance`
+        # drives this script over all four states and holds the literal to
+        # `.immensus/template.json`; the provenance step holds that record to the repository.
+        #
+        # The output is `absent`, read with `!= 'true'`, so anything but a positive answer runs the
+        # step that reads it, the same direction as the draft guard below. An app that does carry
+        # the runner, such as one seeded before the harness left, still runs it here.
+        run: |
+          if [ -f scripts/run-suites.js ]; then
+            absent=false
+          elif [ "$GITHUB_REPOSITORY" = 'ImmensusApp/web-app-template' ]; then
+            echo "❌ scripts/run-suites.js is missing from the template repository, whose own checks run it."
+            exit 1
+          else
+            absent=true
+            echo "scripts/run-suites.js is not in this repository, as expected in an app, so the steps that need it are skipped."
+          fi
+          echo "absent=$absent" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Say what this check does not cover in an app
+        # A summary may not count what an exit status did not say, for the reason the draft step
+        # above gives. The suites step then reads `skipped` in this job, not `success`, which is
+        # what CLAUDE.md §5 tells a reader to look at.
+        if: steps.harness.outputs.absent == 'true' && steps.draft.outputs.draft != 'true'
+        run: |
+          msg="The type-check and the build ran. This app's test suites did NOT run: the test runner is not in this repository. The Immensus builder runs them when it builds or edits the app, so a change made by hand has not been through them."
+          echo "::notice title=Test suites did not run::$msg"
+          echo "⚠️ $msg" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Acceptance + probe suites
+        # `!= 'true'`, never `== 'false'` — see THE DIRECTION above.
+        # The list is derived from package.json by naming convention, never restated here.
+        if: steps.draft.outputs.draft != 'true' && steps.harness.outputs.absent != 'true'
+        run: node scripts/run-suites.js
+
+      # EACH KIT WITH THE CORE. The core is bare bones, and the sign-in and
+      # payments code lives under `kits/`, which no app is seeded with: the platform copies a kit in
+      # when a plan needs it. So the step above tests the core alone, and
+      # this one assembles the core with each kit the way the platform would — kit files at their app
+      # paths, refused if one would overwrite a core file, the kit's package.json merged rather than
+      # copied (kits/assemble.mjs) — and typechecks, builds and runs the full suite set over each.
+      # Both kits together too, because a plan can need both.
+      #
+      # TEMPLATE REPOSITORY ONLY, scoped by `github.repository` and never by a marker in the tree, which
+      # is the rule for a check that must run in one checkout and not another: this workflow is seeded
+      # into every app, and an app has no `kits/`. The draft guard applies as it does above, so the same
+      # `!= 'true'` direction holds — only a positive live `true` skips.
+      - name: Each kit with the core (TEMPLATE REPOSITORY ONLY)
+        if: github.repository == 'ImmensusApp/web-app-template' && steps.draft.outputs.draft != 'true'
+        run: |
+          set -e
+          node kits/assemble.mjs --self-test
+          for kits in "sign-in" "payments" "sign-in payments"; do
+            dest="$RUNNER_TEMP/kit-$(echo "$kits" | tr ' ' '+')"
+            echo "::group::the core with $kits"
+            node kits/assemble.mjs "$dest" $kits
+            (cd "$dest" && npx tsc --noEmit && npx vite build && node scripts/run-suites.js)
+            echo "::endgroup::"
+          done

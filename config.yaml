@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=./node_modules/harperdb/config-app.schema.json
+#
+# SEEDED — one config for dev and the cluster. The repo root is the
+# deployable: `harper deploy . restart=rolling replicated=true` ships this file as-is.
+# An app may change it;
+# what still holds it honest is harness-acceptance, which reads the static mount back out of
+# this file, and spa-routes-acceptance — not a sha comparison.
+
+# KEPT IN THE PUBLISHED COPY for code of the app's own that reads `process.env`; nothing this template
+# ships does — every value it reads comes from this copy's own CONFIG.env (lib/config.js), because a
+# preview copy of this app may run beside it in the same process and `loadEnv` is first-writer-wins.
+# The builder removes this block from the preview copy it deploys.
+loadEnv:
+  files:
+    - 'CONFIG.env'
+
+rest: true
+
+# EVERY `schema*.graphql` AT THE ROOT: the app's own `schema.graphql`, and the file each kit the platform
+# copied in brings — `schema.sign-in.graphql`, `schema.payments.graphql`. A kit only
+# ever ADDS files, so it cannot add its tables to `schema.graphql`; this glob is how they are found.
+# Measured on a real harper@5.3.1 (2026-10-16): the glob loads every match, each file is read on its own
+# (a type cannot reference one declared in another file), and a table declared in two files is not merged
+# — the file read last replaces the other's attributes whole.
+graphqlSchema:
+  files: 'schema*.graphql'
+
+# resources/Pages.js serves every page route and GET /build from a `server.http` listener
+# (lib/pages.js). There is NO `fastifyRoutes` block: Harper serves only one component's
+# fastifyRoutes per process, and a preview copy of this app runs beside the published one.
+jsResource:
+  files: 'resources/*.js'
+
+# The built React app, served under /web/ (Vite builds with base: '/web/'). Deliberately
+# NOT at the root: measured on Harper 5.2.13, static at '/' with fallthrough
+# intercepting requests before the page routes saw them (/build and every named route
+# returned Harper's 404; nested paths threw inside the static resolver). The page listener
+# owns '/' and every page route. The static plugin answers HEAD with 404 and serves assets
+# with max-age=0 + a weak ETag; both are accepted for v1. The preview copy's static is
+# mounted at 'preview/web' and its shell built with that base, by the builder at deploy time.
+static:
+  files: 'web/**'
+  urlPath: 'web'
+  index: true
+
+# REAL STARTING DATA ONLY, such as a fixed list the app cannot work without (rule 31; explicit
+# database/table/records form). Test rows live in data/*.yaml, which this glob does not match: the
+# builder loads them only in the preview copy it deploys, by replacing this glob at deploy time.
+# A row a member has since edited is not overwritten (Harper keeps a per-record hash), but a row
+# deleted from the table is written again on every start while its file is deployed (read and measured
+# on harper@5.3.3, 2026-11-06). An absent directory loads nothing.
+#
+# EACH FILE NAMES ITS OWN DATABASE in its `database:` key, so this seed is NOT affected by
+# `IMMENSUS_DATABASE` (rule 18). The builder rewrites that key to `stage` in the preview copy, so the
+# preview's rows land in the preview's database and never in `data` (measured on a live cluster: with
+# both copies present and no rewrite, production's seed row was written four times per restart).
+dataLoader:
+  files: 'data/production/*.yaml'

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+    <!-- Every look names a Google font, so warm both connections while the HTML parses.
+         Look-AGNOSTIC on purpose: the two hosts are the same for all five, so this line stays
+         FIXED and no app ever edits it. It does not make the font request early — the
+         stylesheet still has to arrive and be parsed before the @import fires, so this makes
+         the ~540 ms of invisible text one hop shorter rather than removing it.
+         Removing the hop needs a per-look link element here, and this file is FIXED so a
+         stage cannot write one: a template decision, not a per-app one. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <title>App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

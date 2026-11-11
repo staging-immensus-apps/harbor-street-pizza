@@ -1,0 +1,30 @@
+# GENERATED — the app's own tables. The builder writes this file whole at plan time.
+# NO export directive on any table (rule 18): every rule this app enforces is a row rule in
+# resources/, and an exported table is a REST route around all of them. `@indexed` on anything a
+# resource sorts or filters by (rule 6) — an unindexed search returns empty, silently.
+# Short-lived tokens live on @table(expiration:) tables keyed by the token HASH (rule 10).
+#
+# config.yaml loads every `schema*.graphql` at the root, so a kit the platform copied in brings its
+# own tables in a file of its own — `schema.sign-in.graphql`, `schema.payments.graphql` — and this file
+# never has to know about them. Two things follow, both measured on a real
+# harper@5.3.1 on 2026-10-16. Harper reads each file on its own, so a type here cannot REFERENCE a type
+# declared in another file (`@relationship` to one is reported unknown): hold another table's id in a
+# plain indexed column instead. And a table declared in TWO files is not merged — the file Harper reads
+# last replaces the other's attributes whole, silently — so never declare a table a kit already has.
+
+# ── template-owned (additive changes only) ───────────────────────────────────
+
+# One row per scheduled run (resources/Scheduler.js). The template's only table: the scheduler is part
+# of the bare core and records what it ran.
+type LoopRun @table {
+  id: ID @primaryKey
+  loop: String @indexed
+  startedAt: String @indexed
+  finishedAt: String
+  outcome: String @indexed
+  notes: String
+  triggeredBy: String
+  node: String
+}
+
+# ── app-owned (the builder writes below this line) ───────────────────────────

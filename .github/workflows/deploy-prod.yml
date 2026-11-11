@@ -1,0 +1,30 @@
+name: Deploy to the app cluster
+
+# FIXED — thin wrapper: every push to main rolls the app's cluster. All the
+# logic lives in deploy-shared.yml; fix gates THERE.
+#
+# SHIPPED DISABLED. The job runs only when the repository variable DEPLOY_WORKFLOWS_ENABLED
+# is 'true', which the control plane sets on the Builder tier once the CLI_* secrets exist.
+# On every tier the builder worker deploys the merged commit itself with the same
+# scripts; this workflow is the documented fallback for a human hand-deploy.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time. A second push queues rather than clobbering a rolling restart.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.DEPLOY_WORKFLOWS_ENABLED == 'true'
+    uses: ./.github/workflows/deploy-shared.yml
+    with:
+      target: prod
+      # <slug>.immensus.app, or the custom domain once attached. A repo variable,
+      # not a literal, because the same FIXED file ships to every app.
+      public_url: ${{ vars.PUBLIC_APP_URL }}
+    secrets: inherit

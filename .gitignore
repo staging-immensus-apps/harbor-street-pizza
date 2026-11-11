@@ -1,0 +1,47 @@
+node_modules/
+# Both forms on purpose: the trailing-slash pattern matches only a real directory, so a
+# node_modules SYMLINK — how installed deps get shared into a git worktree — slips past it
+# and `git add -A` tracks a mode-120000 link to an absolute path on one machine.
+node_modules
+
+# BUILT: `vite build` output, produced before every deploy, never committed.
+web/
+
+# Written by the builder worker (or deploy-shared.yml) at deploy time from secrets it mints
+# per job. `.env*` catches every local variant; none of them ship.
+.env
+.env.*
+CONFIG.env
+CONFIG.env.bak
+stage.env
+
+.DS_Store
+*.log
+.idea/
+dist/
+*.tsbuildinfo
+
+# Claude Code session state — per-developer permission grants, occasionally raw command
+# strings with test-mode keys. `*` instead of the bare directory so the negations below
+# can re-include the shared charters (git never descends into a fully-ignored directory).
+.claude/*
+!.claude/agents/
+!.claude/commands/
+
+# Private key material never ships: the value belongs in the control plane's custody and
+# CONFIG.env at deploy time. pr-check.yml scans for PEM blocks and service-account JSON
+# in tracked files; these patterns stop the file from being staged in the first place.
+*.iam.gserviceaccount.com.json
+*service-account*.json
+*.pem
+*.key
+*.p12
+*.p8
+*.pfx
+
+# agent-review.yml writes the reviewing agent's findings here in CI, inside the checked-out
+# workspace, for the workflow to post. Never a tracked file.
+agent-review-findings.md
+# And, when a PR edits agent-review.yml, the default branch's copy of it plus a diff — the
+# baseline the reviewer judges that PR against. Same reason: workspace, not tracked.
+agent-review-workflow-diff.patch

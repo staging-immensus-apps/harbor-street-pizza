@@ -1,0 +1,29 @@
+name: Deploy to STAGING
+
+# FIXED — deploys ANY ref to the app's staging cluster, which exists on the
+# Builder tier only: `<slug>-staging.immensus.app`. Manual-only: pick the branch in
+# the Actions tab → Run workflow. This is how a human collaborator tests a risky change
+# against a real cluster before merging to main.
+#
+# SHIPPED DISABLED (see deploy-prod.yml). Needs STAGE_CLI_TARGET, STAGE_CLI_TARGET_USERNAME,
+# STAGE_CLI_TARGET_PASSWORD and the STAGING_APP_URL variable. When humans and the builder
+# worker share one staging cluster, an earlier app's staging lease (scripts/staging-lease.js,
+# a later package) protects the verification window after the deploy.
+
+on:
+  workflow_dispatch:
+
+# Serializes staging deploys; cancel-in-progress stays false so a queued run never lands on
+# top of a verification in progress.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.DEPLOY_WORKFLOWS_ENABLED == 'true'
+    uses: ./.github/workflows/deploy-shared.yml
+    with:
+      target: staging
+      public_url: ${{ vars.STAGING_APP_URL }}
+    secrets: inherit

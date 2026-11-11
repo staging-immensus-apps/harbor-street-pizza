@@ -1,0 +1,49 @@
+/* Grove — Warm and calm. Easy on the eyes for long visits. */
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    --background: 45 33.3% 95.3%;
+    --foreground: 120 15.1% 14.3%;
+    --card: 42.9 100% 98.6%;
+    --card-foreground: 120 15.1% 14.3%;
+    --popover: 42.9 100% 98.6%;
+    --popover-foreground: 120 15.1% 14.3%;
+    --primary: 142 39% 30.2%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 70.9 20.8% 89.6%;
+    --secondary-foreground: 120 15.1% 14.3%;
+    --muted: 48 22.7% 91.4%;
+    --muted-foreground: 95.3 9.1% 36.7%;
+    --accent: 104 26.3% 88.8%;
+    --accent-foreground: 142.2 42.6% 21.2%;
+    --destructive: 4.8 61.4% 43.7%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 48 19.5% 84.9%;
+    --input: 69.2 5.7% 55.1%;
+    --ring: 142 39% 30.2%;
+    --radius: 0.75rem;
+  }
+  .dark {
+    --background: 120 10% 7.8%;
+    --foreground: 82.5 17.4% 91%;
+    --card: 120 8.8% 11.2%;
+    --card-foreground: 82.5 17.4% 91%;
+    --popover: 120 8.8% 11.2%;
+    --popover-foreground: 82.5 17.4% 91%;
+    --primary: 135 33.3% 62.4%;
+    --primary-foreground: 136.4 26.8% 8%;
+    --secondary: 111.4 8.9% 15.5%;
+    --secondary-foreground: 82.5 17.4% 91%;
+    --muted: 111.4 8.9% 15.5%;
+    --muted-foreground: 90 9.3% 62%;
+    --accent: 141.8 24.4% 17.6%;
+    --accent-foreground: 132 35.2% 86.1%;
+    --destructive: 5.5 81.3% 68.6%;
+    --destructive-foreground: 120 10% 7.8%;
+    --border: 111.4 7.9% 17.5%;
+    --input: 106.7 4.4% 40.2%;
+    --ring: 135 33.3% 62.4%;
+  }
+  body { font-family: 'Figtree', system-ui, sans-serif; }
+}

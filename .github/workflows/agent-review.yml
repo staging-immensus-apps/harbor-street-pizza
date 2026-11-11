@@ -1,0 +1,579 @@
+name: Agent code review
+
+# Claude reviews every non-draft PR against CLAUDE.md §4 and the
+# workflow posts the findings as a PR comment, then verifies the comment exists before
+# going green. The shape is load-bearing: when the agent posted its own
+# comment, a silent posting failure produced a green check with no review and nothing
+# noticed. Do not "simplify" this into the agent commenting.
+#
+# Where it runs: on the template repo and on Builder-tier repos, as this
+# Action, with the CLAUDE_CODE_OAUTH_TOKEN secret. On Trial and
+# Tinkerer repos there is no token — the builder worker runs the same charter
+# (.claude/agents/review.md) as its Reviewer stage and posts through the GitHub App. When
+# the token is absent this workflow looks for that review on this commit (the `builder` step).
+# If it is there the check is green and links to it. If it is not, nothing reviewed the diff, so
+# the workflow posts a notice saying exactly that and the check is RED. A pull request made by hand
+# on such a repository is red here until a person has decided to merge it anyway.
+#
+# A PR that edits THIS file CANNOT be reviewed by it, and the reason is worth stating exactly,
+# because it is easy to get wrong in either direction. claude-code-action
+# refuses to run at all when the workflow file differs from the default branch's copy —
+# measured, not inferred:
+#
+#   Skipping action due to workflow validation: Workflow validation failed. The workflow file
+#   must exist and have identical content to the version on the repository's default branch.
+#
+# That is a real protection and the right one: it is why a PR cannot rewrite its own reviewer
+# into one that approves it. What makes it dangerous is the second half — the action reports
+# that step as SUCCESS while skipping (`outcome=success;conclusion=success`), so nothing about
+# a skipped review is visible unless something downstream looks for its absence.
+#
+# So "review a self-edit against the default branch's copy of itself" is not available to THIS
+# TRIGGER at all: the validation reads the workflow of the RUN, which for a `pull_request` event
+# is the copy the PR carries, whatever this job checks out. Two routes do reach it:
+#
+#   - `gh workflow run agent-review.yml -f pr=<N>` — MEASURED, not inferred, and it works
+#     (on a standalone copy exactly like this one). A dispatch
+#     runs the copy of the workflow on the DEFAULT branch, which is the copy the validation
+#     accepts, while the job still checks out the pull request's head — so the review really
+#     happens, on the PR's diff, by a definition the PR cannot rewrite. That is the remedy to
+#     reach for today, and it is no longer a hedged sentence.
+#   - a `pull_request_target` trigger, where GitHub takes the definition from the base branch —
+#     the same tamper-proof-trigger property Anthropic's own agent-approval-check relies on.
+#     It would AUTOMATE what the dispatch does by hand, and it changes how every generated app
+#     is gated, so it is not taken here: the dispatch above is the route, by hand, today.
+#
+# AND THE GUARD CANNOT TELL A SELF-EDIT FROM A STALE BRANCH. `head_blob != base_blob` is true for
+# two situations and the action refuses in both: this PR edits the workflow, or this branch
+# PREDATES a change to it — in which case the attached diff is the default branch's own merged
+# change, reversed, and the remedy is a rebase rather than a human reading a change the PR never
+# proposed. Every message below therefore describes what was MEASURED (the two copies differ) and
+# names the rebase, instead of asserting the edit; asserting it was false exactly half the time,
+# in the one comment a human is told to read carefully. Telling the two apart needs the PR's
+# own diff against its MERGE BASE rather than its head against the default branch, which is one
+# `git merge-base` away with `fetch-depth: 0`, and is not done here yet.
+#
+# What IS done here: the skip is DETECTED rather than predicted, and THE `review` CHECK IS NEVER
+# GREEN WHEN NOTHING REVIEWED THE DIFF. Every way of not reviewing has one of two results. With no
+# copy of this file on the default branch, or no token and no review by the builder, a notice is
+# posted and the check is red. On a DRAFT pull request the `review` job does not run unless it was
+# started by hand with `gh workflow run`, so it reads `skipped` rather than `success`;
+# `ready_for_review` is in the trigger list, so the review arrives when the PR does. That decision is
+# its own job, `pr-state`, because a job's `if:` is the only thing that can stop a check reporting
+# success, and it has to read the pull request as it is rather than the event payload. If `pr-state`
+# fails, `review` runs and fails too, because a skip would read as a pass where `review` is required. The guard below establishes whether this workflow differs from its baseline and
+# writes the default branch's copy plus a labelled diff; if the review then produces no findings,
+# the delivery step posts that diff for a human to read and FAILS the job, because a check
+# must not report success in the same breath as saying it checked nothing. And if a future action version does permit a self-edit,
+# the findings path lights up on its own, with a banner naming what the review could not be.
+#
+# One thing that holds on every PR, self-edit or not: claude-code-action restores CLAUDE.md,
+# .claude/, .mcp.json and .claude.json from the PR BASE branch before starting Claude (keeping
+# the PR-authored copies under .claude-pr/ for reference only), so the charter and the rules the
+# reviewer works from are never the PR's.
+#
+# Draft handling is a live API check, not a job-level `if` on the event payload:
+# `synchronize` can fire while the PR is still draft and
+# `ready_for_review` seconds later with a STALE head sha. Re-run a missed review with:
+#   gh workflow run agent-review.yml -f pr=<N>
+#
+# Requires CLAUDE_CODE_OAUTH_TOKEN — the output of `claude setup-token`, NOT an Anthropic
+# API key (the SDK rejects raw API keys).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to review
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+# Push + `gh pr ready` back-to-back fires two events for one live head — keep the newest.
+concurrency:
+  group: agent-review-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  pr-state:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      number: ${{ steps.pr.outputs.number }}
+      draft: ${{ steps.pr.outputs.draft }}
+      sha: ${{ steps.pr.outputs.sha }}
+    steps:
+      - name: Resolve live PR state
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
+        run: |
+          set -euo pipefail
+          out="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" \
+            --jq '"number=\(.number)\ndraft=\(.draft)\nsha=\(.head.sha)"')"
+          echo "$out" | tee -a "$GITHUB_OUTPUT"
+          # A green run with empty outputs would check out the stale event ref. Fail loudly.
+          echo "$out" | grep -q '^sha=[0-9a-f]\{40\}$'
+
+      - name: Say a draft is not reviewed
+        if: steps.pr.outputs.draft == 'true' && github.event_name != 'workflow_dispatch'
+        run: |
+          echo "PR #${{ steps.pr.outputs.number }} is a draft — the review job is skipped."
+          echo "Re-run once ready with: gh workflow run agent-review.yml -f pr=${{ steps.pr.outputs.number }}"
+
+  review:
+    needs: pr-state
+    if: ${{ !cancelled() && (needs.pr-state.result != 'success' || needs.pr-state.outputs.draft != 'true' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # The handoff between the agent and the poster. One definition, referenced by the
+      # prompt and by both delivery steps — a second spelling is a silent no-review.
+      REVIEW_FILE: ${{ github.workspace }}/agent-review-findings.md
+    steps:
+      - name: Stop if the pull request could not be read
+        if: needs.pr-state.result != 'success'
+        run: |
+          echo "❌ the pr-state job failed, so nothing reviewed this diff. Re-run the workflow."
+          exit 1
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.pr-state.outputs.sha }}
+
+      - name: Is a review token configured?
+        id: token
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then echo "present=true" | tee -a "$GITHUB_OUTPUT"
+          else echo "present=false" | tee -a "$GITHUB_OUTPUT"; echo "no CLAUDE_CODE_OAUTH_TOKEN — this workflow cannot review, so it looks for the builder worker's review"; fi
+
+      - name: Did the builder worker review this commit?
+        id: builder
+        # Only a comment from the builder's GitHub App counts, because nobody else can post as it.
+        # THE SET OF ACCEPTED LOGINS IS A CLOSED LIST, AND IT IS TWO LONG. The builder runs as a
+        # DIFFERENT GitHub App per environment, so its login is not one value: production posts as
+        # `immensus-builder[bot]` and the test environment as `immensus-builder-staging[bot]`. Until
+        # #471 only the first was counted, so every app built in the test environment ended its pull
+        # request with a red `review` saying nothing had reviewed the diff, while a review by the
+        # builder sat in the thread above it (`immensus-builder#471`; measured on
+        # `staging-immensus-apps/release1` PR #1, whose review comment is by the staging login).
+        #
+        # It is a LIST OF EXACT LOGINS and not a pattern such as `immensus-builder-*[bot]`, and not a
+        # repository variable, both of which were considered and rejected:
+        #   - a pattern is a namespace anyone may register in. App names are globally unique but
+        #     unreserved, so a third party can own `immensus-builder-anything[bot]`; a closed list
+        #     leaves no such name to claim.
+        #   - a repository variable moves the definition of "the reviewer" inside the repository
+        #     being reviewed, where anyone with admin on it can point the check at an account they
+        #     control. This workflow's whole shape exists to stop a pull request choosing its own
+        #     reviewer, so the reviewer's identity stays in the template, where a change to it is a
+        #     template pull request that is reviewed.
+        # The cost, stated rather than discovered: a new environment needs an entry here and a
+        # template pin bump in `immensus-control`. That is the intended cost of the two rejections
+        # above, and `harness-acceptance` pins the list so dropping to one login, or widening it to
+        # any `[bot]`, fails before a build does.
+        #
+        # The commit-author half of this step needs no such list: the builder commits under the git
+        # name `Immensus Builder` in both environments (measured on the same pull request), and that
+        # name is set by the builder, not by the App it authenticates as.
+        # Its last review has to approve, and nothing after that review may change anything but the
+        # two files the builder itself commits once a review is done, its review record and its
+        # CLAUDE.md notes. A rename counts under both names, so a file moved onto one of those two
+        # is still seen. Measured over every pull request in the app repositories on 2026-11-06:
+        # the builder pushes that commit after its review on most of them, so a review can never
+        # be matched to the head sha alone.
+        #
+        # A commit by anyone else counts as after the review whatever its date says, so a commit
+        # made earlier and pushed later is not hidden by its timestamp.
+        #
+        # EVERY FAILURE MEANS NOT REVIEWED, AND THAT IS THE RED DIRECTION: the reads sit in a function
+        # called from an `if`, so `set -e` cannot end the step before it has written an answer. It
+        # also keeps every GitHub expression in `env:`, which is what lets `harness-acceptance`
+        # execute this script against a stubbed `gh`.
+        if: steps.token.outputs.present != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.pr-state.outputs.number }}
+          SHA: ${{ needs.pr-state.outputs.sha }}
+        run: |
+          reviewed=false
+          url=''
+          why='the builder worker has not reviewed this pull request'
+          decide () {
+            comments="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments")" || return 1
+            commits="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls/${PR}/commits")" || return 1
+            last="$(printf '%s' "$comments" | jq -c '[.[] | if type == "array" then .[] else . end | select((.user.login == "immensus-builder[bot]" or .user.login == "immensus-builder-staging[bot]") and (.body | startswith("<!-- immensus-review:")))] | last')" || return 1
+            [ "$last" != 'null' ] || return 0
+            if ! printf '%s' "$last" | jq -e '.body | test("\\*\\*Verdict:\\*\\* approve(?![-\\w])")' > /dev/null; then
+              why="the builder worker's last review did not approve"
+              return 0
+            fi
+            at="$(printf '%s' "$last" | jq -r '.created_at')" || return 1
+            from="$(printf '%s' "$commits" | jq -r --arg at "$at" '[.[] | if type == "array" then .[] else . end | select(.commit.committer.date > $at or .commit.committer.name != "Immensus Builder")] | first | .parents[0].sha // empty')" || return 1
+            if [ -n "$from" ]; then
+              changed="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${from}...${SHA}" | jq -r '.files[] | .filename, (.previous_filename // empty)')" || return 1
+              if printf '%s\n' "$changed" | grep -qvxE '\.immensus/review\.json|CLAUDE\.md'; then
+                why="commits after the builder worker's review changed other files"
+                return 0
+              fi
+            fi
+            url="$(printf '%s' "$last" | jq -r '.html_url')" || return 1
+            reviewed=true
+            why=''
+          }
+          if ! decide; then
+            reviewed=false
+            url=''
+            why='this pull request could not be read, so no review can be claimed'
+          fi
+          { echo "reviewed=$reviewed"; echo "url=$url"; echo "why=$why"; } | tee -a "$GITHUB_OUTPUT"
+
+      - name: Which copy of this workflow is the baseline?
+        id: wfguard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+          PR: ${{ needs.pr-state.outputs.number }}
+          PATCH: ${{ github.workspace }}/agent-review-workflow-diff.patch
+        run: |
+          set -euo pipefail
+          F=.github/workflows/agent-review.yml
+          BASE="$RUNNER_TEMP/base-agent-review.yml"
+          # The agent's Write is the ONLY thing that may create the findings file.
+          # .gitignore does not make a path untrackable: a PR that `git add -f`s an
+          # agent-review-findings.md saying "No findings." has actions/checkout materialise it —
+          # upstream restores .claude/ and CLAUDE.md from the base branch, nothing else — and the
+          # delivery step posts whatever is there as the review. That is a PR handing the workflow
+          # its own verdict, so it is removed here, before any step can read it, and the run is RED.
+          #
+          # RED IS A DECISION, NOT AN OVERSIGHT. The argument against red was
+          # that in a GENERATED app the tree is written by the builder, so a stage that wrote this
+          # path for any reason would red a required-looking check inside a founder's repository,
+          # where nobody can read a job log. That argument was checked rather than weighed, and its
+          # premise does not hold: `agent-review-findings.md` is in the .gitignore that ships into
+          # every app (harness-acceptance pins the entry, so an app that drops it reds here first),
+          # the builder stages every commit with `git add -A`, which respects .gitignore,
+          # and `git add -f` appears nowhere in the builder. So there is no accidental producer of this file in the template OR in a
+          # generated app — reaching the tree takes a deliberate force-add — and remove-and-continue
+          # would mean an attempted forgery merging under a green tick with one log line nobody
+          # reads as its only trace. A green check over a forged verdict is the one failure this
+          # project is organised around: an instrument that stops discriminating goes GREEN, not red.
+          #
+          # The contents are never printed, only the SIZE: a forgery in the job log reads as a
+          # review to the next person who looks, which is the defect wearing a different hat.
+          #
+          # ONE COST OF GOING RED HERE, NAMED RATHER THAN DISCOVERED: this step runs before the
+          # delivery step, so a forging pull request gets a red check and NO pull-request comment
+          # — the explanation lives only in the job log. That is accepted because the audience
+          # is right: reaching this branch takes a
+          # deliberate `git add -f`, so the person who sees the red is the person who did it, and
+          # they do not need to be told what they just committed. The case that WOULD need a
+          # comment — an honest contributor tripping it by accident — is the case the .gitignore
+          # and `git add -A` evidence above rules out. Revisit if that ever stops being true.
+          if [ -e "$REVIEW_FILE" ]; then
+            bytes="$(wc -c < "$REVIEW_FILE" | tr -d ' ')"
+            rm -f "$REVIEW_FILE"
+            echo "❌ this pull request COMMITTED $REVIEW_FILE (${bytes} bytes) — the path the reviewing"
+            echo "   agent writes its findings to, and the path the delivery step posts as the review."
+            echo "   It has been removed, and this run is red rather than reviewing on top of it."
+            echo "   That file is in .gitignore; reaching the tree needs \`git add -f\`, so there is no"
+            echo "   accident that produces it. Drop it from the branch and push again."
+            exit 1
+          fi
+          # Two outputs, three outcomes. `runnable` is whether a baseline exists at all;
+          # `selfedit` is whether this PR changes the reviewer. A self-edit is REVIEWABLE —
+          # runnable=true — and the pair is set in one place so no branch can set half of it.
+          verdict () { { echo "runnable=$1"; echo "selfedit=$2"; } | tee -a "$GITHUB_OUTPUT"; }
+          # A PR that DELETES the reviewer is the largest possible edit to it. `git rev-parse` would
+          # abort the step here with a raw git error, which is the right colour and the wrong words.
+          if ! head_blob="$(git rev-parse --verify --quiet "HEAD:$F")"; then
+            echo "❌ $F is not in this PR's tree — this pull request DELETES the reviewer."
+            echo "   Nothing can review that but a person. Refusing to go green or to guess."
+            exit 1
+          fi
+          lookup_ok=true
+          gh api -H 'Accept: application/vnd.github.raw' \
+            "repos/${GITHUB_REPOSITORY}/contents/${F}?ref=${DEFAULT_BRANCH}" \
+            > "$BASE" 2>"$RUNNER_TEMP/wfguard.err" || lookup_ok=false
+          # A 404 is a definite answer, not a failed lookup: the file is absent on the default
+          # branch. That happens for exactly one PR in a repository's life — the one that
+          # installs this workflow — and there is then no baseline to review the diff against.
+          if [ "$lookup_ok" != true ] && grep -q 'HTTP 404' "$RUNNER_TEMP/wfguard.err"; then
+            echo "$F does not exist on ${DEFAULT_BRANCH} yet — there is no baseline to review against."
+            verdict false false
+            exit 0
+          fi
+          # THREE outcomes, not two: an unresolvable baseline is a red run, never a confident
+          # verdict either way — that would be a green check with no review behind it.
+          if [ "$lookup_ok" != true ] || [ ! -s "$BASE" ]; then
+            echo "❌ could not read $F on ${DEFAULT_BRANCH} (lookup_ok=$lookup_ok, $(wc -c < "$BASE" | tr -d ' ') bytes)."
+            echo "   Re-run: gh workflow run agent-review.yml -f pr=${PR}"
+            exit 1
+          fi
+          # Hash the bytes we fetched rather than trusting the API's .sha field: the sha is only
+          # evidence about the file if it is computed from the same bytes handed to the reviewer.
+          # --no-filters because git hash-object otherwise applies the clean filter .gitattributes
+          # chooses for the NAME it is given, and a generated app may well add a `*.yml text` rule
+          # — which would hash these bytes to something the stored blob never equals and report a
+          # self-edit on every PR in that app. There is no .gitattributes here today; the flag is
+          # for the app that adds one, where the failure would be noise nobody traced back.
+          base_blob="$(git hash-object --no-filters "$BASE")"
+          if [ "$head_blob" = "$base_blob" ]; then
+            echo "$F is byte-identical to ${DEFAULT_BRANCH} (${base_blob}) — the definition running here IS the baseline."
+            verdict true false
+            exit 0
+          fi
+          # The self-edit case. The baseline is the DEFAULT BRANCH copy — never this PR's — so
+          # write that copy and a diff against it for the reviewer to read, and print the diff
+          # into the job log as well so it is legible without the review comment.
+          echo "$F differs from ${DEFAULT_BRANCH} (head ${head_blob}, base ${base_blob}) — reviewing it against that baseline."
+          verdict true true
+          # -L twice: unlabelled, the left-hand side reads as a path under RUNNER_TEMP, and which
+          # side is the standard is the one thing this file must not leave to inference. Computed
+          # once and read twice — the reviewer and the job log must not be able to disagree.
+          diff -u -L "BASELINE (${DEFAULT_BRANCH})" -L 'SUBJECT (this pull request)' \
+            "$BASE" "$F" > "$RUNNER_TEMP/wfguard.diff" || true
+          { printf '%s\n' \
+              "# BASELINE: .github/workflows/agent-review.yml as it stands on ${DEFAULT_BRANCH} (blob ${base_blob})." \
+              "# The copy in this pull request (blob ${head_blob}) is the SUBJECT, never the standard." \
+              '# The unified diff from the baseline to the subject follows the ==== line.' \
+              ''
+            cat "$BASE"
+            printf '\n%s\n\n' '===='
+            cat "$RUNNER_TEMP/wfguard.diff"
+          } > "$PATCH"
+          echo "wrote $(wc -l < "$PATCH" | tr -d ' ') lines to $PATCH"
+          cat "$RUNNER_TEMP/wfguard.diff"
+
+      - name: Claude review
+        id: claude
+        if: steps.wfguard.outputs.runnable == 'true' && steps.token.outputs.present == 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
+          # `gh pr comment` and `gh api` are deliberately NOT allowed: the agent
+          # writes findings to a file and the workflow posts. harness-acceptance pins this.
+          claude_args: |
+            --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Read,Grep,Glob,Write"
+          prompt: |
+            You are the `review` agent whose charter is .claude/agents/review.md in this
+            repository. Follow it exactly. Read CLAUDE.md first — §4 is the checklist:
+            owner-scope leaks (rule 19), auth shape (20), runtime safety (5, 8, 16–18, 21,
+            23, 24), Harper API shape (1–4, 6–10), secrets, idempotency, and whether every
+            new resource, page, or invariant arrives with a hermetic suite that names it and
+            carries a negative control.
+
+            The PR head (${{ needs.pr-state.outputs.sha }}) is checked out. Get the diff with:
+
+              gh pr diff ${{ needs.pr-state.outputs.number }}
+
+            Rank findings most-severe first, cite file and line, say what to change. Don't
+            invent problems. Put `BLOCKING:` at the top if something must not merge.
+
+            ${{ steps.wfguard.outputs.selfedit == 'true' && 'SELF-EDIT — READ THIS BEFORE THE DIFF. This pull request''s .github/workflows/agent-review.yml differs from the default branch''s copy: it changes the file that defines you (or, if the PR does not touch it, the branch predates a change to it and needs a rebase). Read agent-review-workflow-diff.patch in the working directory first: it holds the DEFAULT BRANCH copy of that file, then a `====` line, then a unified diff from that copy to this pull request''s. The default branch copy is the baseline; the copy in this checkout is the subject, and is never the standard to judge by. Make the workflow change your FIRST finding, prefixed `BLOCKING:`, and say in plain words what it changes about how reviews run, what it weakens if anything, and what a human should check by hand. Report it even when the change looks routine and even when you judge it an improvement: GitHub runs the copy of a pull_request workflow that the pull request itself carries, so you can report a change to your own definition but you are not immune to one, and a human reading your findings is the only thing that is.' || '' }}
+
+            When you are done, write your findings — and nothing else — to exactly this
+            path, using the Write tool:
+
+              ${{ env.REVIEW_FILE }}
+
+            You do NOT post the comment. The workflow reads that file, prepends the
+            `Agent review of <sha>` line, posts it, and fails the job if the comment did not
+            land — so writing the file IS delivering the review, and an empty or missing
+            file fails the run. Write the file even when the diff is clean: then its entire
+            contents are "No findings." Do not add a heading naming the sha.
+
+      # ---- delivery -----------------------------------------------------------
+      # Delivery belongs to the workflow, and the workflow checks its own work.
+      - name: Post the review comment
+        id: post
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.pr-state.outputs.number }}
+          SHA: ${{ needs.pr-state.outputs.sha }}
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          RUNNABLE: ${{ steps.wfguard.outputs.runnable }}
+          SELF_EDIT: ${{ steps.wfguard.outputs.selfedit }}
+          HAS_TOKEN: ${{ steps.token.outputs.present }}
+          BUILDER_REVIEWED: ${{ steps.builder.outputs.reviewed }}
+          BUILDER_REVIEW_URL: ${{ steps.builder.outputs.url }}
+          BUILDER_WHY: ${{ steps.builder.outputs.why }}
+        run: |
+          set -euo pipefail
+          body=''
+          salvaged=false
+          notreviewed=false
+          if [ "$RUNNABLE" != 'true' ]; then
+            # This is the pull request that installs the reviewer, once in the life of a repository.
+            # Nothing is wrong with it, and nothing reviewed it either, so the check is red.
+            # printf, not a heredoc — a heredoc terminator inside a YAML block scalar breaks
+            # silently on a re-indent.
+            notreviewed=true
+            body="$(printf '%s\n' \
+              '⛔ **This diff was NOT reviewed, and this check is red because of it: there is no baseline on the default branch.**' \
+              '' \
+              '`.github/workflows/agent-review.yml` does not exist on the default branch yet, so this is' \
+              'the pull request that installs the reviewer — once in the life of a repository. Have a' \
+              'human read this diff, or run `/review <N>` in a session.' \
+              '' \
+              'Nothing is broken. But nothing was checked either.')"
+          elif [ "$HAS_TOKEN" != 'true' ] && [ "${BUILDER_REVIEWED:-false}" = 'true' ]; then
+            body="$(printf '%s\n' \
+              '✅ **Reviewed by the builder worker, not by this workflow.**' \
+              '' \
+              "Its review: ${BUILDER_REVIEW_URL}")"
+          elif [ "$HAS_TOKEN" != 'true' ]; then
+            # Not an error in this repository's setup, and still not a review, so the check is red.
+            notreviewed=true
+            body="$(printf '%s\n' \
+              '⛔ **This diff was NOT reviewed, and this check is red because of it.**' \
+              '' \
+              "This repository has no \`CLAUDE_CODE_OAUTH_TOKEN\`, and ${BUILDER_WHY:-the builder worker has not reviewed this pull request}." \
+              '' \
+              'Have a person read this diff before merging, or run `/review <N>` in a session. To have this' \
+              'workflow review it, set the secret and re-run with `gh workflow run agent-review.yml -f pr=<N>`.')"
+          elif [ -s "$REVIEW_FILE" ]; then
+            body="$(cat "$REVIEW_FILE")"
+            echo "findings file: $(wc -c < "$REVIEW_FILE" | tr -d ' ') bytes"
+            # Findings AND a self-edit: the action permitted what it refuses today. Not impossible
+            # — it is their validation, not ours — so the path is live, with a banner naming what
+            # the review could not be rather than letting a reader assume the gate held.
+            if [ "$SELF_EDIT" = 'true' ]; then
+              body="$(printf '%s\n' \
+                '⚠️ **This pull request'"'"'s `.github/workflows/agent-review.yml` differs from the default branch — it changes the file that defines this reviewer.**' \
+                '' \
+                'It was reviewed, with the copy of that file on the **default branch** as the baseline (handed' \
+                'to the reviewer as `agent-review-workflow-diff.patch` and printed in the job log). The workflow' \
+                'change should be the first finding below.' \
+                '' \
+                '**Read the workflow diff yourself before merging.** A review of a change to the reviewer is' \
+                'not a substitute for a human reading that change.' \
+                '' '---' '' "$body")"
+            fi
+          elif [ "$SELF_EDIT" = 'true' ] && [ -z "${EXECUTION_FILE:-}" ]; then
+            # DETECTED, not predicted — and the condition is the evidence, not the inference. No
+            # findings file AND no execution log is "the action never started", which is what the
+            # workflow-validation refusal looks like (measured: EXECUTION_FILE is empty).
+            # A self-edit that DID produce a log went some other way — a timeout, a
+            # rate limit, a crash — so it falls through to the salvage branch below rather than
+            # being told a cause nobody observed. Naming the wrong reason confidently is worse
+            # than naming none.
+            notreviewed=true
+            # The diff is the payload of this comment, so it is capped HERE rather than left to the
+            # 60000-character body truncation below: that slice would cut inside the fence and leave
+            # a code block that never closes, in the one comment a human has to read carefully. And
+            # a missing file says so rather than rendering an empty block — the guard writes it on
+            # every path that sets SELF_EDIT=true, so an absence would be a defect worth naming.
+            wfdiff='(the workflow diff is missing from the runner — read it in the job log)'
+            if [ -s "$RUNNER_TEMP/wfguard.diff" ]; then
+              wfdiff="$(cat "$RUNNER_TEMP/wfguard.diff")"
+              if [ "${#wfdiff}" -gt 40000 ]; then
+                wfdiff="${wfdiff:0:40000}"$'\n\n(truncated — the whole diff is in the job log)'
+              fi
+            fi
+            body="$(printf '%s\n' \
+              '⛔ **This diff was NOT reviewed, and this check is red because of it.**' \
+              '' \
+              'What was observed: this pull request'"'"'s `.github/workflows/agent-review.yml` differs from the copy on' \
+              'the default branch — either this PR edits it, or this branch predates a change to it and needs a' \
+              'rebase. The review agent wrote no findings, and `claude-code-action` produced no execution log at' \
+              'all — it never started.' \
+              'That is the workflow-validation refusal: *"The workflow file must exist and have identical content' \
+              'to the version on the repository'"'"'s default branch."* The refusal is the protection which stops a' \
+              'pull request from rewriting its own reviewer, so it is correct — but the action reports the skipped' \
+              'step as **success**, which is why this check fails here rather than going green.' \
+              '' \
+              '**Someone has to read the change to the reviewer.** It is below, against the default branch, and' \
+              'in the job log. Run `/review <N>` in a session for the rest of the diff.' \
+              '' \
+              'Reviewing a self-edit automatically needs a `pull_request_target` trigger, where GitHub takes the' \
+              'definition from the base branch, which is not set up here.' \
+              'The route is by hand: `gh workflow run agent-review.yml -f pr=<N>` dispatches' \
+              'the default branch'"'"'s copy — the one the validation accepts — and really does review this diff.' \
+              '' '---' '' '```diff' "$wfdiff" '```')"
+          elif [ -n "${EXECUTION_FILE:-}" ] && [ -s "${EXECUTION_FILE:-}" ]; then
+            # Salvage, not success: the agent's final message may be a sentence ABOUT the
+            # review rather than the review. Post it with a banner; fail after delivery.
+            echo "⚠️  no findings file — salvaging the final message from the execution log"
+            salvaged="$(jq -r '[.. | objects | select(.type == "result") | .result // empty] | last // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
+            if [ -n "$salvaged" ]; then
+              body="$(printf '%s\n' \
+                '⚠️ **Salvaged from the run log — the agent never wrote its findings file.**' \
+                'Treat as unverified and re-run: `gh workflow run agent-review.yml -f pr=<N>`.' \
+                '' '---' '' "$salvaged")"
+              salvaged=true
+            else
+              salvaged=false
+            fi
+          fi
+          echo "salvaged=$salvaged" >> "$GITHUB_OUTPUT"
+          echo "notreviewed=$notreviewed" >> "$GITHUB_OUTPUT"
+
+          body="$(printf '%s\n' "$body" | sed '/./,$!d')"
+          body="$(printf '%s\n' "$body" | sed -e '1{' -e '/^Agent review of /d' -e '}')"
+          if [ -z "${body//[[:space:]]/}" ]; then
+            echo "❌ the review produced no findings file and no recoverable output. Failing instead of"
+            echo "   going green with an empty PR. Re-run: gh workflow run agent-review.yml -f pr=${PR}"
+            exit 1
+          fi
+          # GitHub rejects bodies over 65536 characters. Bash slicing, not `head -c`: head
+          # closes the pipe, printf takes SIGPIPE, and under pipefail the step dies with 141.
+          if [ "${#body}" -gt 60000 ]; then
+            body="${body:0:60000}"$'\n\n_(truncated — full review in the run log)_'
+          fi
+          { printf 'Agent review of %s\n\n' "$SHA"; printf '%s\n' "$body"; } > "$RUNNER_TEMP/review-comment.md"
+          id="$(jq -Rs '{ body: . }' < "$RUNNER_TEMP/review-comment.md" \
+            | gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --input - --jq '.id')"
+          echo "posted comment id=$id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the review comment landed
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.pr-state.outputs.number }}
+          SHA: ${{ needs.pr-state.outputs.sha }}
+          ID: ${{ steps.post.outputs.id }}
+          SALVAGED: ${{ steps.post.outputs.salvaged }}
+          NOT_REVIEWED: ${{ steps.post.outputs.notreviewed }}
+        run: |
+          set -euo pipefail
+          # A tier-1 read of the artifact itself (CLAUDE.md §6): ask the PR what comments it
+          # has, not the POST what it thinks it did. --slurp flattens defensively — gh's
+          # paginated shape differs by version, and a shape surprise must not read as delivered.
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+            | jq '[.[] | if type == "array" then .[] else . end]' > "$RUNNER_TEMP/pr-comments.json"
+          found="$(jq -r --argjson id "${ID:-0}" --arg sha "$SHA" \
+            '[.[] | select(.id == $id) | .body | select(startswith("Agent review of " + $sha))] | length' \
+            "$RUNNER_TEMP/pr-comments.json")"
+          if [ "$found" != "1" ]; then
+            echo "❌ comment id=${ID:-<none>} for sha ${SHA} is not on PR #${PR} — the review was NOT delivered."
+            echo "   Re-run: gh workflow run agent-review.yml -f pr=${PR}"
+            exit 1
+          fi
+          echo "✅ review comment id=$ID for ${SHA:0:7} is on PR #${PR}"
+          if [ "${SALVAGED:-false}" = 'true' ]; then
+            echo "❌ the posted comment was salvaged from the run log, not written by the agent."
+            echo "   It may be a pointer rather than a review. Re-run: gh workflow run agent-review.yml -f pr=${PR}"
+            exit 1
+          fi
+          # Deliver, THEN fail — the same order as the salvage case above, and for the same reason:
+          # the human needs the comment, and the check needs to be red. When nothing reviewed the
+          # diff the notice IS the whole verdict, so it must not sit under a green tick.
+          if [ "${NOT_REVIEWED:-false}" = 'true' ]; then
+            echo "❌ nothing reviewed this diff. The comment posted on PR #${PR} says why and what to do."
+            exit 1
+          fi
