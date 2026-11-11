@@ -19,4 +19,11 @@ export type AppRoute = {
 
 export const ROUTES: readonly AppRoute[] = [
   { path: '/', page: 'Home' },
+  { path: '/basket', page: 'Basket' },
+  { path: '/checkout', page: 'Checkout' },
+  { path: '/order/*', page: 'OrderConfirmation' },
+  { path: '/manage', page: 'ManageHome', admin: true },
+  { path: '/manage/orders', page: 'Orders', admin: true },
+  { path: '/manage/menu', page: 'MenuEditor', admin: true },
+  { path: '/manage/settings', page: 'Settings', admin: true },
 ]
