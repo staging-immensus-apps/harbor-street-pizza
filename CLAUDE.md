@@ -574,21 +574,30 @@ each job. These are the template's, for hazards an app's own code can hit and §
   `process.exit(0)` after the verdict is written.
 **This app's own**
 
-- **A write whose PATH NAMES A RECORD is refused by Harper before the resource runs**: every menu
-  edit and every order status change answered a bodyless `400` on the live `/preview` deployment —
-  `PATCH /MenuAdminApi/<id>` for any field, `PUT /OrderAdminApi/<id>` for Mark preparing, Mark ready
-  and Cancel alike — while `PUT /StoreSettingsApi`, which has no record segment, answered 200
-  throughout. It cost two fix loops, because the first read it as a verb problem and swapping the
-  update onto PUT changed nothing: the variable is the record path, not the verb. The tell that it
-  is Harper and not us is the bare statusText `"Bad Request"` in the page's banner — `errorText()`
-  reaches `res.statusText` only when the JSON body carries no `error` key, and every 400 this app
-  writes carries one, so a "Bad Request" banner means our handler never ran → **an admin write takes
-  its id in the BODY and names an ACTION in the path** (`POST /MenuAdminApi/update`,
-  `POST /MenuAdminApi/delete`, `POST /OrderAdminApi/status`), the shape proven live here by
-  `POST /AuthApi/request-link`, `POST /CheckoutApi/order` and `POST /AdminApi/users/invite`. Reads by
-  id (`GET /OrderConfirmationApi/<code>`) are unaffected and stay as they are → `MenuAdminApi-probe`
-  and `OrderAdminApi-probe` drive the action routes; the verb-on-id handlers are kept as aliases, so
-  a hermetic probe alone would not have caught this and did not.
+- **OPEN QUESTION, NOT A MEASUREMENT — every admin write 400s on the live deployment and we do not
+  yet know why.** This is written here to stop the next session repeating a guess, and it is
+  deliberately NOT in the hazard shape above: no gate pins it and no cause is established.
+  - *Observed* (QA, evidence tier 1): `PATCH /MenuAdminApi/<id>` and `PUT /OrderAdminApi/<id>`
+    answered `400` with the bare statusText `"Bad Request"`; after the writes were reshaped to
+    `POST /MenuAdminApi/update`, `POST /MenuAdminApi/delete` and `POST /OrderAdminApi/status`,
+    **those answer `400` too**, including a save that changed no values. `PUT /StoreSettingsApi`
+    answered `200` throughout.
+  - *Falsified*: "Harper refuses a write whose path names a record." The action routes carry no
+    record segment and fail identically, so the record path is not the variable. An earlier round
+    had already discarded "the verb is the variable" (PATCH→PUT changed nothing). **Two theories,
+    two fix loops, no reproduction — the pattern is the lesson.** Note also that the `"Bad Request"`
+    banner shows only that no JSON `error` key reached the page; it does NOT locate the refusal in
+    Harper rather than in this app's code, and it was wrong to read it as proof that our handler
+    never ran.
+  - *What is missing before anything is changed again*: one raw failing response captured whole —
+    status, headers and body bytes — with the Harper server log line beside it, and the Harper
+    version it was read at (CLAUDE.md §2 requires the version on any claim about Harper's
+    behaviour; the discarded entry carried none). The narrowest remaining common factor is what QA
+    named: both failing endpoints take an id plus a changed field **in the body**, and the one
+    endpoint that works sends no id at all.
+  - *Why no suite catches it*: `MenuAdminApi-probe` and `OrderAdminApi-probe` drive these same
+    routes in-process and pass. Whatever this is lives above the resource, so a hermetic probe
+    cannot see it and adding another will not help.
 - **A `CONFIG.env` in the working tree reds suites that pass in CI**: `lib/config.js` reads that file
   and ignores `process.env` (rule 30), and CI has no such file → move it aside before believing the red.
 

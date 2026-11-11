@@ -6,22 +6,14 @@
 //   GET    /OrderAdminApi/:id                                  one order in full, or 404
 //   POST   /OrderAdminApi/status   { id, status }              advance the status; the queue is derived
 //                                                              from it so the two can never disagree.
-//                                                              THIS is the route the front end calls, and
-//                                                              the id travels in the BODY rather than the
-//                                                              path, because the path is what was wrong:
-//                                                              on a real cluster (measured 2026-11-11)
-//                                                              Harper's REST layer refuses a write aimed at
-//                                                              a RECORD path — `/OrderAdminApi/:id` — on a
-//                                                              custom Resource with a 400 before this
-//                                                              module's put() or patch() ever ran, for
-//                                                              every verb, not only PATCH (an earlier fix
-//                                                              moved this from PATCH to PUT on the mistaken
-//                                                              theory that the verb was the problem, and the
-//                                                              403 persisted). An action path with no record
-//                                                              segment — `/OrderAdminApi/status` — is never
-//                                                              refused that way, the same shape
-//                                                              `AuthApi/request-link`, `CheckoutApi/order`
-//                                                              and `AdminApi/users/invite` already use live.
+//                                                              THIS is the route the front end calls.
+//   UNRESOLVED: this shape was adopted on the theory that Harper refuses a write whose path names a
+//   record, and that theory is WRONG — QA on this build found `POST /OrderAdminApi/status`, which has
+//   no record segment, answering 400 on two separate orders exactly as `PUT /OrderAdminApi/:id` did.
+//   An earlier round had already discarded "the verb is the variable" (PATCH→PUT changed nothing).
+//   The cause of the 400 is NOT KNOWN; CLAUDE.md §7 "OPEN QUESTION" records what evidence is missing
+//   (one raw failing response plus the server log line, and the Harper version). The action route is
+//   kept because it is no worse than what it replaced, not because it is known to be right.
 //   PUT    /OrderAdminApi/:id   { status }                     kept working as an alias for anything that
 //   PATCH  /OrderAdminApi/:id   { status }                     still reaches them; same shared merge.
 //   connect (SSE)                                             live Order arrivals/changes, admin-only

@@ -12,19 +12,13 @@ export function createMenuItem(body: MenuItemWrite): Promise<MenuAdminItemRespon
 }
 
 /**
- * A WRITE CARRIES ITS ID IN THE BODY, NEVER IN A RECORD PATH, and that is measured rather than
- * stylistic. `PATCH /MenuAdminApi/<id>` and `PUT /MenuAdminApi/<id>` both answered 400 on the live
- * /preview deployment for every body — a changed price, a changed description, an availability
- * toggle. The refusal came from Harper's REST layer BEFORE the resource ran: the page showed the
- * bare statusText "Bad Request", and `errorText()` only falls back to that when the JSON body has no
- * `error` key, which every 400 this app writes does carry. Harper reads a single trailing segment as
- * a record id and refuses to hand a custom Resource a write against one; `PUT /StoreSettingsApi`,
- * which has no record segment, answers 200 all along.
- *
- * So the id travels in the body and the path names an ACTION — the one write shape proven live in
- * this deployment (`POST /AuthApi/request-link`, `POST /CheckoutApi/order`,
- * `POST /AdminApi/users/invite`). These signatures are unchanged, so no page changes with them; the
- * resource still answers PATCH and PUT at `/<id>` for anything that reaches it.
+ * The id travels in the body and the path names an action. UNRESOLVED, and NOT a measured rule:
+ * this shape was adopted on the theory that Harper refuses a write whose path names a record, and
+ * QA on this build falsified it — `POST /MenuAdminApi/update` and `POST /MenuAdminApi/delete` carry
+ * no record segment and still answer 400, including on a save that changed no values. An earlier
+ * round had already discarded "the verb is the variable" (PATCH→PUT changed nothing). The cause is
+ * NOT KNOWN; CLAUDE.md §7 "OPEN QUESTION" records the evidence still missing. Do not reshape these
+ * calls again before one raw failing response and its server log line have been captured.
  */
 export function updateMenuItem(id: string, body: Partial<MenuItemWrite>): Promise<MenuAdminItemResponse> {
   return api.post<MenuAdminItemResponse>('MenuAdminApi/update', { ...body, id })

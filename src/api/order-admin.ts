@@ -14,17 +14,13 @@ export function getOrderById(id: string): Promise<OrderAdminOneResponse> {
 }
 
 /**
- * THE ORDER'S ID TRAVELS IN THE BODY, NOT IN THE PATH. `PUT /OrderAdminApi/<id>` answered 400 on the
- * live /preview deployment for every action — Mark preparing, Mark ready, Cancel — across distinct
- * orders, and so did PATCH before it. The verb was never the variable: the refusal is Harper's REST
- * layer declining a write aimed at a RECORD PATH on a custom Resource, which is why swapping PATCH
- * for PUT changed nothing and why `PUT /StoreSettingsApi` (no record segment) was 200 throughout.
- * The page showed the bare statusText "Bad Request", which `errorText()` reaches only when the body
- * has no `error` key — so our handler, whose every 400 names the allowed statuses, never ran.
- *
- * `POST /OrderAdminApi/status` is the shape proven live here (`POST /CheckoutApi/order`,
- * `POST /AuthApi/request-link`). The signature is unchanged, so src/pages/admin/Orders.tsx is not
- * touched; the resource keeps put() and patch() at `/<id>` for anything that still reaches them.
+ * The order's id travels in the body and the path names an action. UNRESOLVED, and NOT a measured
+ * rule: this shape was adopted on the theory that Harper refuses a write aimed at a record path,
+ * and QA on this build falsified it — `POST /OrderAdminApi/status` has no record segment and still
+ * answered 400 on two separate orders. An earlier round had already discarded "the verb is the
+ * variable" (PATCH→PUT changed nothing). The cause is NOT KNOWN; CLAUDE.md §7 "OPEN QUESTION"
+ * records the evidence still missing. Do not reshape this call again before one raw failing
+ * response and its server log line have been captured.
  */
 export function setOrderStatus(id: string, status: OrderStatus): Promise<OrderAdminOneResponse> {
   return api.post<OrderAdminOneResponse>('OrderAdminApi/status', { id, status })

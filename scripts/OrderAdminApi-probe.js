@@ -7,11 +7,12 @@
 // connect() never reaches subscribe() without passing requireAdmin first, that the default list is
 // the active queue and a junk ?queue= falls back to it, and that a status update keeps the queue in
 // lockstep with the status while the body cannot smuggle a change to any other field.
-// `POST /OrderAdminApi/status` with the id in the BODY is the route the front end actually calls —
-// Harper's REST layer refuses a write aimed at a RECORD path (`/OrderAdminApi/:id`) on a custom
-// Resource with a 400 before the resource ever runs, for every verb, measured on a real cluster
-// 2026-11-11 — so POST status gets its own full negative-control pass, and PUT/PATCH on the record
-// path are kept covered as aliases.
+// `POST /OrderAdminApi/status` with the id in the BODY is the route the front end actually calls,
+// so it gets its own full negative-control pass, and PUT/PATCH on the record path are kept covered
+// as aliases. That shape was adopted on the theory that Harper refuses a write aimed at a record
+// path, and QA on this build falsified it: POST status answers 400 on the deployment too. The cause
+// is unresolved (CLAUDE.md §7 "OPEN QUESTION"), and NOTHING IN THIS FILE SPEAKS TO IT — these
+// assertions run in-process against the stub and pass for either shape.
 //
 // Hermetic: clock frozen, no network, no git.
 

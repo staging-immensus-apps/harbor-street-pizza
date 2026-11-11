@@ -7,16 +7,14 @@
 //   POST   /MenuAdminApi/update      { id, ...partial fields } → { item } — THE update route.
 //   POST   /MenuAdminApi/delete      { id } → { ok: true } — THE delete route.
 //
-// THE ID TRAVELS IN THE BODY AND THE PATH NAMES AN ACTION, never a record. Measured live on this
-// deployment, 2026-11-11: Harper's REST layer refuses a write whose path names a record
-// (`/MenuAdminApi/:id`) on a custom Resource with a 400 BEFORE this resource's code ever runs —
-// evidence was the bare `"Bad Request"` statusText reaching the browser, which `errorText()`
-// (src/lib/format.ts) only falls back to when the JSON body carries no `error` key, and every 400
-// this resource itself emits carries one. `PUT /StoreSettingsApi`, which has no record segment,
-// answered 200 throughout the same session. So the verb was never the variable; the fix is the
-// shape already proven live elsewhere in this app (`POST /AuthApi/request-link`,
-// `POST /CheckoutApi/order`, `POST /AdminApi/users/invite`): an action name after the resource,
-// the id inside the posted body.
+// The id travels in the body and the path names an action. UNRESOLVED: this shape was adopted on
+// the theory that Harper refuses a write whose path names a record, and THAT THEORY IS WRONG — QA
+// on this build found `POST /MenuAdminApi/update` and `POST /MenuAdminApi/delete`, which carry no
+// record segment, answering 400 exactly as `PATCH /MenuAdminApi/:id` did, including on a save that
+// changed no values. An earlier round had already discarded "the verb is the variable" (PATCH→PUT
+// changed nothing). So the cause of the 400 is NOT KNOWN; see CLAUDE.md §7 "OPEN QUESTION" for the
+// evidence that is missing. The action routes are kept because they are no worse than what they
+// replaced and the page already calls them — not because they are known to be right.
 //
 // `PUT /MenuAdminApi/:id`, `PATCH /MenuAdminApi/:id` and `DELETE /MenuAdminApi/:id` are KEPT
 // working exactly as before, as aliases for anything that still reaches them — sharing the same

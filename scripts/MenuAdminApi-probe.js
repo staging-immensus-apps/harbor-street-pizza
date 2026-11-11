@@ -9,11 +9,12 @@
 // row that snapshot it.
 //
 // THE UPDATE AND DELETE ROUTES ARE POST /MenuAdminApi/update and POST /MenuAdminApi/delete, BODY
-// CARRIES THE id: Harper's REST layer refuses a write whose path names a record
-// (`/MenuAdminApi/:id`) on a custom Resource, with a 400 before this resource's code ever runs
-// (measured on a real cluster, 2026-11-11). `PUT`/`PATCH`/`DELETE` at `/:id` are kept working as
-// aliases, so every assertion below is driven over both shapes — the action routes as the proven
-// ones, the verb-on-id routes as aliases — to prove the body and the merge are identical either way.
+// CARRIES THE id. That shape was adopted on the theory that Harper refuses a write whose path names
+// a record, and QA on this build falsified it: the action routes answer 400 on the deployment too.
+// The cause is unresolved (CLAUDE.md §7 "OPEN QUESTION"), and NOTHING IN THIS FILE SPEAKS TO IT —
+// these assertions run in-process against the stub and pass for either shape. `PUT`/`PATCH`/`DELETE`
+// at `/:id` are kept working as aliases, so every assertion below is driven over both shapes, to
+// hold the body and the merge identical either way.
 //
 // Hermetic: clock frozen, no network, no git.
 
@@ -120,7 +121,7 @@ section('create validates the price and ignores a forged id / createdAt')
   check('the row is now in the table', tables.MenuItem.rows.has(created.json.item.id))
 }
 
-section('the update action route (POST /MenuAdminApi/update, the proven route): partial, and a forged id/createdAt changes neither')
+section('the update action route (POST /MenuAdminApi/update, the route the page calls): partial, and a forged id/createdAt changes neither')
 {
   const created = await call(MenuAdminApi, 'POST', '', { cookie: ADMIN.cookie, body: { name: 'Calzone', description: 'Folded pizza', priceCents: 800, category: 'Pizza' } })
   check('setup create -> 201', created.status === 201)
@@ -160,7 +161,7 @@ section('the update action route (POST /MenuAdminApi/update, the proven route): 
   check('a sub-path under update -> 404', extra.status === 404)
 }
 
-section('the delete action route (POST /MenuAdminApi/delete, the proven route) removes the row; a second call and an unknown id are 404')
+section('the delete action route (POST /MenuAdminApi/delete, the route the page calls) removes the row; a second call and an unknown id are 404')
 {
   const created = await call(MenuAdminApi, 'POST', '', { cookie: ADMIN.cookie, body: { name: 'Side Salad', priceCents: 350 } })
   check('setup create -> 201', created.status === 201)
@@ -182,7 +183,7 @@ section('the delete action route (POST /MenuAdminApi/delete, the proven route) r
   check('an unrecognized POST action -> 404 and writes nothing', unknownAction.status === 404 && tables.MenuItem.rows.has('seed-hidden'))
 }
 
-section('the update route (PUT, proven on the cluster) and its PATCH alias are both partial: one field changes, the rest survive')
+section('the PUT update alias and its PATCH alias are both partial: one field changes, the rest survive')
 for (const verb of ['PUT', 'PATCH']) {
   // Each verb gets its own freshly-created row so the two passes cannot see each other's writes.
   const created = await call(MenuAdminApi, 'POST', '', { cookie: ADMIN.cookie, body: { name: 'Garlic Bread', priceCents: 450 } })
