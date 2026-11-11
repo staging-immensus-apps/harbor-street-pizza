@@ -1,0 +1,12 @@
+{
+  "url": "https://harbor-street-pizza.immensus-staging.app/preview/",
+  "sha": "6a69901d77a03f7088cf58bf250d74b6052cc857",
+  "target": "staging",
+  "database": "stage",
+  "accounts": [
+    "admin",
+    "member",
+    "member2"
+  ],
+  "unusableAccounts": []
+}
