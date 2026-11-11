@@ -1,287 +1,264 @@
 {
-  "schema": "# GENERATED — the app's own tables. The builder writes this file whole at plan time.\n# NO export directive on any table (rule 18): every rule this app enforces is a row rule in\n# resources/, and an exported table is a REST route around all of them. `@indexed` on anything a\n# resource sorts or filters by (rule 6) — an unindexed search returns empty, silently.\n# Short-lived tokens live on @table(expiration:) tables keyed by the token HASH (rule 10).\n#\n# The sign-in kit brings User, MagicLink, EmailLog and EmailSuppression in schema.sign-in.graphql,\n# and the payments kit brings StripeEvent in schema.payments.graphql. Never declare those here: a\n# table declared in two files is not merged, it is replaced.\n\n# ── template-owned (additive changes only) ───────────────────────────────────\n\n# One row per scheduled run (resources/Scheduler.js). The template's only table: the scheduler is part\n# of the bare core and records what it ran. This app writes one row per nightly retention sweep, with\n# a deterministic id (clear-personal-details:YYYY-MM-DD) so a repeated tick claims the same row.\ntype LoopRun @table {\n  id: ID @primaryKey\n  loop: String @indexed\n  startedAt: String @indexed\n  finishedAt: String\n  outcome: String @indexed\n  notes: String\n  triggeredBy: String\n  node: String\n}\n\n# ── app-owned (the builder writes below this line) ───────────────────────────\n\n# One item on the shop's menu. Prices are whole cents, never floats.\ntype MenuItem @table {\n  id: ID @primaryKey\n  name: String @indexed\n  description: String\n  priceCents: Int\n  category: String @indexed\n  available: Boolean @indexed\n  sortOrder: Int @indexed\n  createdAt: Long @createdTime\n  updatedAt: Long @updatedTime\n}\n\n# One customer order. audit: true because the owner's order screen subscribes to this table for new\n# orders arriving without a reload (Harper refuses subscribe on a table with no audit store).\n# Line items are a snapshot of name and price at the time of ordering, so a later price change never\n# rewrites an old order.\ntype Order @table(audit: true) {\n  id: ID @primaryKey\n  code: String @indexed\n  placedAt: String @indexed\n  status: String @indexed\n  queue: String @indexed\n  fulfilment: String @indexed\n  customerName: String\n  customerPhone: String\n  deliveryAddress: String\n  deliveryPostcode: String\n  items: [Any]\n  itemsTotalCents: Int\n  deliveryFeeCents: Int\n  totalCents: Int\n  paymentStatus: String @indexed\n  paymentRef: String @indexed\n  readyEstimate: String\n  personalDetailsClearedAt: String @indexed\n  updatedAt: Long @updatedTime\n}\n\n# A single row, id \"store\", holding the shop-level settings the owner edits. The resources fall back\n# to built-in defaults when the row is absent, so the app works before it is ever saved.\ntype StoreSetting @table {\n  id: ID @primaryKey\n  storeName: String\n  acceptingOrders: Boolean\n  pausedMessage: String\n  pickupEnabled: Boolean\n  deliveryEnabled: Boolean\n  deliveryFeeCents: Int\n  deliveryPostcodes: [String]\n  pickupEstimateMinutes: Int\n  deliveryEstimateMinutes: Int\n  updatedAt: Long @updatedTime\n}\n",
+  "schema": "# GENERATED — the app's own tables. The builder writes this file whole at plan time.\n# NO export directive on any table (rule 18): every rule this app enforces is a row rule in\n# resources/, and an exported table is a REST route around all of them. `@indexed` on anything a\n# resource sorts or filters by (rule 6) — an unindexed search returns empty, silently.\n# Short-lived tokens live on @table(expiration:) tables keyed by the token HASH (rule 10).\n#\n# The sign-in kit brings User, MagicLink, EmailLog and EmailSuppression in schema.sign-in.graphql,\n# and the payments kit brings StripeEvent in schema.payments.graphql. Never declare those here: a\n# table declared in two files is not merged, it is replaced.\n#\n# TIMESTAMPS HARPER OWNS. A field carrying @createdTime or @updatedTime is ASSIGNED BY HARPER, in\n# epoch milliseconds, which is why each one below is typed Long. Application code must never put a\n# value for such a field in a record it writes — not a fresh ISO string, and not the value it read\n# back off the stored row a moment earlier. Every field so marked is listed again in CLAUDE.md §8\n# with the rule, because this is the whole of a defect that made every admin save answer 400.\n\n# ── template-owned (additive changes only) ───────────────────────────────────\n\n# One row per scheduled run (resources/Scheduler.js). The template's only table: the scheduler is part\n# of the bare core and records what it ran. This app writes one row per nightly retention sweep, with\n# a deterministic id (clear-personal-details:YYYY-MM-DD) so a repeated tick claims the same row.\ntype LoopRun @table {\n  id: ID @primaryKey\n  loop: String @indexed\n  startedAt: String @indexed\n  finishedAt: String\n  outcome: String @indexed\n  notes: String\n  triggeredBy: String\n  node: String\n}\n\n# ── app-owned (the builder writes below this line) ───────────────────────────\n\n# One item on the shop's menu. Prices are whole cents, never floats.\n# createdAt and updatedAt are Harper's: never written by resources/MenuAdminApi.js (see the header).\ntype MenuItem @table {\n  id: ID @primaryKey\n  name: String @indexed\n  description: String\n  priceCents: Int\n  category: String @indexed\n  available: Boolean @indexed\n  sortOrder: Int @indexed\n  createdAt: Long @createdTime\n  updatedAt: Long @updatedTime\n}\n\n# One customer order. audit: true because the owner's order screen subscribes to this table for new\n# orders arriving without a reload (Harper refuses subscribe on a table with no audit store).\n# Line items are a snapshot of name and price at the time of ordering, so a later price change never\n# rewrites an old order.\n# updatedAt is Harper's: a write that restates a stored row must drop it before putting it back.\ntype Order @table(audit: true) {\n  id: ID @primaryKey\n  code: String @indexed\n  placedAt: String @indexed\n  status: String @indexed\n  queue: String @indexed\n  fulfilment: String @indexed\n  customerName: String\n  customerPhone: String\n  deliveryAddress: String\n  deliveryPostcode: String\n  items: [Any]\n  itemsTotalCents: Int\n  deliveryFeeCents: Int\n  totalCents: Int\n  paymentStatus: String @indexed\n  paymentRef: String @indexed\n  readyEstimate: String\n  personalDetailsClearedAt: String @indexed\n  updatedAt: Long @updatedTime\n}\n\n# A single row, id \"store\", holding the shop-level settings the owner edits. The resources fall back\n# to built-in defaults when the row is absent, so the app works before it is ever saved.\n# updatedAt is Harper's. StoreSettingsApi already never sends one, which is the single reason this\n# one resource's saves kept working while every other admin save answered 400.\ntype StoreSetting @table {\n  id: ID @primaryKey\n  storeName: String\n  acceptingOrders: Boolean\n  pausedMessage: String\n  pickupEnabled: Boolean\n  deliveryEnabled: Boolean\n  deliveryFeeCents: Int\n  deliveryPostcodes: [String]\n  pickupEstimateMinutes: Int\n  deliveryEstimateMinutes: Int\n  updatedAt: Long @updatedTime\n}\n",
   "apiPlan": {
+    "integrations": [
+      "api.stripe.com",
+      "api.resend.com"
+    ],
     "resources": [
       {
         "name": "MenuApi",
         "table": "MenuItem",
         "tables": [
-          "MenuItem"
-        ],
-        "ownerRule": {
-          "kind": "public",
-          "note": "The menu is the shop window: anyone, signed in or not, may read it. Returns only rows with available: true, sorted by category then sortOrder (both @indexed, so the sort reads an index). Never returns unavailable items."
-        },
-        "methods": [
-          {
-            "method": "GET",
-            "path": "/MenuApi",
-            "note": "Available items, grouped by category in the response, each with name, description and priceCents."
-          }
-        ],
-        "stories": []
-      },
-      {
-        "name": "MenuAdminApi",
-        "table": "MenuItem",
-        "tables": [
-          "MenuItem"
-        ],
-        "ownerRule": {
-          "kind": "admin",
-          "note": "Only the signed-in owner (role exactly 'admin') may read every item including hidden ones, or create, change or remove one. Every method throws a 403 Response with code 'auth_required' for anyone else."
-        },
-        "methods": [
-          {
-            "method": "GET",
-            "path": "/MenuAdminApi",
-            "note": "Every item, available or not, sorted by category then sortOrder."
-          },
-          {
-            "method": "POST",
-            "path": "/MenuAdminApi",
-            "note": "Create an item. Body: name, description, priceCents (integer cents, >= 0), category, available, sortOrder. Rejects a non-integer or negative price with 400."
-          },
-          {
-            "method": "PATCH",
-            "path": "/MenuAdminApi/:id",
-            "note": "Change name, description, priceCents, category, available or sortOrder. Takes effect on the public menu on the next read."
-          },
-          {
-            "method": "DELETE",
-            "path": "/MenuAdminApi/:id",
-            "note": "Remove an item. Orders already placed keep their own snapshot of the name and price, so history is not rewritten."
-          }
-        ],
-        "stories": []
-      },
-      {
-        "name": "StoreInfoApi",
-        "table": "StoreSetting",
-        "tables": [
           "StoreSetting"
         ],
         "ownerRule": {
           "kind": "public",
-          "note": "The shop-level facts a customer needs before ordering: shop name, whether orders are being accepted, the pause message, whether pickup and delivery are on, the delivery fee, the list of delivery postcodes and the two time estimates. Reads the single row id 'store' by primary key and answers built-in defaults when it is absent, so this never 404s. Returns nothing private — no orders, no customer details."
+          "note": "The public menu: available items only, grouped by category. Unchanged by this edit."
         },
         "methods": [
           {
             "method": "GET",
-            "path": "/StoreInfoApi",
-            "note": "One object. Always 200."
+            "path": "/MenuApi"
           }
-        ],
-        "stories": []
+        ]
       },
       {
-        "name": "StoreSettingsApi",
+        "name": "StoreInfoApi",
         "table": "StoreSetting",
-        "tables": [
-          "StoreSetting",
-          "LoopRun"
-        ],
         "ownerRule": {
-          "kind": "admin",
-          "note": "Only the signed-in owner reads or writes the shop settings. It also reads the most recent LoopRun row for the loop 'clear-personal-details' so the settings screen can show when customer details were last cleared; it never writes LoopRun (the scheduled sweep owns that table)."
+          "kind": "public",
+          "note": "Shop-level facts a customer needs — name, whether ordering is on, pickup/delivery, fee, estimates. Nothing private. Unchanged by this edit."
         },
         "methods": [
           {
             "method": "GET",
-            "path": "/StoreSettingsApi",
-            "note": "Current settings (or the defaults when unsaved), plus lastDetailsClearedAt read from the newest matching LoopRun row."
-          },
-          {
-            "method": "PUT",
-            "path": "/StoreSettingsApi",
-            "note": "Save all settings. Creates the row id 'store' on first save. Validates: deliveryFeeCents an integer >= 0, estimates integers 1..180, postcodes trimmed and upper-cased with blanks dropped. Turning delivery on with an empty postcode list is refused with 400 — the area is what makes delivery answerable."
+            "path": "/StoreInfoApi"
           }
-        ],
-        "stories": []
+        ]
       },
       {
         "name": "CheckoutApi",
         "table": "Order",
         "tables": [
-          "Order",
           "MenuItem",
           "StoreSetting"
         ],
         "ownerRule": {
           "kind": "public",
-          "note": "Guests order without an account, so anyone may call this. The cart arriving from the browser is never trusted: every line is re-read from MenuItem by id and priced from the table, an unavailable or unknown item is refused, and the delivery fee comes from StoreSetting. The caller cannot set status, queue, paymentStatus, paymentRef or totals."
+          "note": "Guest checkout. Every line is re-read from MenuItem and re-priced server-side; the caller may not set totals, status, queue, paymentStatus, paymentRef or code. Unchanged by this edit — and it is one of the two writers that already work, because the record it creates carries no Harper-owned timestamp."
         },
         "methods": [
           {
             "method": "POST",
-            "path": "/CheckoutApi/quote",
-            "note": "Body: lines [{menuItemId, quantity}], fulfilment ('pickup'|'delivery'), deliveryPostcode. Returns priced lines, itemsTotalCents, deliveryFeeCents, totalCents, the time estimate, and for delivery whether the postcode is in the list. Writes nothing."
+            "path": "/CheckoutApi/quote"
           },
           {
             "method": "POST",
-            "path": "/CheckoutApi/order",
-            "note": "Re-prices the cart the same way, then creates one Order. Refuses with 400 when ordering is paused, when the postcode is outside the delivery list, or when the cart is empty. With no Stripe key configured the order is created queue 'active', status 'received', paymentStatus 'pay_at_store' and the response carries the order code. With a Stripe key it is created queue 'pending_payment', status 'awaiting_payment', paymentStatus 'unpaid', and the response carries a Stripe Checkout URL; the order only joins the owner's queue when the payments kit's StripeWebhook confirms payment."
+            "path": "/CheckoutApi/order"
           }
-        ],
-        "stories": []
+        ]
       },
       {
         "name": "OrderConfirmationApi",
         "table": "Order",
-        "tables": [
-          "Order"
-        ],
         "ownerRule": {
           "kind": "public",
-          "note": "Reached only by the order's own 32-character random code (indexed), which is in the link the customer is sent to after checkout — there is no listing and no way to enumerate orders. Returns that one order's items, totals, pickup/delivery choice, payment state, status and ready estimate, and nothing from any other order. Once the retention sweep has cleared an order's personal details it returns the order without them."
+          "note": "Reachable only by the order's own 32-character random code. No listing, one order per request. Unchanged by this edit."
         },
         "methods": [
           {
             "method": "GET",
-            "path": "/OrderConfirmationApi/:code",
-            "note": "One order by its code. An unknown code is 404."
+            "path": "/OrderConfirmationApi/:code"
           }
-        ],
-        "stories": []
+        ]
+      },
+      {
+        "name": "MenuAdminApi",
+        "table": "MenuItem",
+        "ownerRule": {
+          "kind": "admin",
+          "note": "CHANGED BY THIS EDIT. Role exactly 'admin' on every method, re-read from the User row per request — that part stays as it is. What changes is the RECORD each write builds: createItem must send no createdAt and no updatedAt at all, and updateItem must drop both off the stored row it spreads before putting it back. Those two fields carry @createdTime/@updatedTime, so Harper assigns them; a record that names one is refused with a bare 400 and no JSON body, which is the 'Bad Request' banner the owner sees. Keep the routes exactly as they are — the page already calls POST /MenuAdminApi/update and POST /MenuAdminApi/delete, the record path was already ruled out as the variable, and reshaping them a third time would confound the one change being measured."
+        },
+        "methods": [
+          {
+            "method": "GET",
+            "path": "/MenuAdminApi"
+          },
+          {
+            "method": "GET",
+            "path": "/MenuAdminApi/:id"
+          },
+          {
+            "method": "POST",
+            "path": "/MenuAdminApi"
+          },
+          {
+            "method": "POST",
+            "path": "/MenuAdminApi/update"
+          },
+          {
+            "method": "POST",
+            "path": "/MenuAdminApi/delete"
+          },
+          {
+            "method": "PUT",
+            "path": "/MenuAdminApi/:id"
+          },
+          {
+            "method": "PATCH",
+            "path": "/MenuAdminApi/:id"
+          },
+          {
+            "method": "DELETE",
+            "path": "/MenuAdminApi/:id"
+          }
+        ]
       },
       {
         "name": "OrderAdminApi",
         "table": "Order",
-        "tables": [
-          "Order"
-        ],
         "ownerRule": {
           "kind": "admin",
-          "note": "Only the signed-in owner. Customer names, phone numbers and delivery addresses are visible here and nowhere else."
+          "note": "CHANGED BY THIS EDIT, the same single fault. applyStatus() spreads the stored row — `{ ...existing, status, queue }` — and the stored row carries updatedAt, which is @updatedTime, so the put names a field Harper owns and is refused 400. Write only the fields that change (a patch of status and queue, or a put whose record has updatedAt deleted). The admin rule, the status whitelist, the derived queue and the rule that nothing else in the body is ever trusted all stay exactly as they are. connect/subscribe keeps its requireAdmin() first line."
         },
         "methods": [
           {
             "method": "GET",
-            "path": "/OrderAdminApi",
-            "note": "Orders for one queue, newest first: ?queue=active (default) or done, scoped by the indexed equality on queue and sorted on the indexed placedAt. With Accept: text/event-stream the same path answers the live stream instead — connect() subscribes to the Order table (audit: true) and pushes each new or changed order, so the owner's screen updates without a reload; the page falls back to re-reading this list every 15 seconds if the stream drops."
+            "path": "/OrderAdminApi"
           },
           {
             "method": "GET",
-            "path": "/OrderAdminApi/:id",
-            "note": "One order in full."
+            "path": "/OrderAdminApi/:id"
+          },
+          {
+            "method": "POST",
+            "path": "/OrderAdminApi/status"
+          },
+          {
+            "method": "PUT",
+            "path": "/OrderAdminApi/:id"
           },
           {
             "method": "PATCH",
-            "path": "/OrderAdminApi/:id",
-            "note": "Move the status along: received → preparing → ready → collected, or cancelled. Setting collected or cancelled also sets queue 'done'. Any other value is 400."
+            "path": "/OrderAdminApi/:id"
           }
+        ]
+      },
+      {
+        "name": "StoreSettingsApi",
+        "table": "StoreSetting",
+        "tables": [
+          "LoopRun"
         ],
-        "stories": []
+        "ownerRule": {
+          "kind": "admin",
+          "note": "Unchanged, and it is the control: this resource builds its record from a constant id plus validated fields and never names updatedAt, which is why its saves answered 200 all along while every other admin save answered 400. Reads LoopRun for the last-cleared date; never writes it."
+        },
+        "methods": [
+          {
+            "method": "GET",
+            "path": "/StoreSettingsApi"
+          },
+          {
+            "method": "PUT",
+            "path": "/StoreSettingsApi"
+          }
+        ]
       }
-    ],
-    "integrations": [
-      "api.stripe.com",
-      "api.resend.com"
     ]
   },
   "pagePlan": {
     "routes": [
       {
         "path": "/",
-        "name": "Menu",
-        "purpose": "The shop front: the whole menu by category, with a running basket. The first thing a customer sees on their phone.",
-        "stories": [
-          "browse-menu"
-        ],
+        "title": "Menu",
+        "stories": [],
         "calls": [
           "GET /MenuApi",
           "GET /StoreInfoApi"
         ],
-        "admin": false
+        "notes": "Unchanged. The menu by category with a running basket; the paused message replaces the basket when ordering is off."
       },
       {
         "path": "/basket",
-        "name": "Basket",
-        "purpose": "Review what is in the basket, change quantities, remove a line, see the running total. One job per screen, thumb-sized controls.",
+        "title": "Basket",
         "stories": [],
         "calls": [
           "GET /StoreInfoApi",
           "POST /CheckoutApi/quote"
         ],
-        "admin": false
+        "notes": "Unchanged."
       },
       {
         "path": "/checkout",
-        "name": "Checkout",
-        "purpose": "Pickup or delivery, then the details that choice needs: name and phone for both, address and postcode for delivery only. Shows the delivery fee and the final total, then places the order — sending the customer to card payment when Stripe is connected.",
-        "stories": [
-          "choose-pickup-or-delivery",
-          "pay-online"
-        ],
+        "title": "Checkout",
+        "stories": [],
         "calls": [
           "GET /StoreInfoApi",
           "POST /CheckoutApi/quote",
           "POST /CheckoutApi/order"
         ],
-        "admin": false
+        "notes": "Unchanged."
       },
       {
         "path": "/order/:code",
-        "name": "Order confirmation",
-        "purpose": "Confirmation after checkout: order number, what was ordered, the total, pickup or delivery, payment state and the estimated ready time. The same link shows the live status as the kitchen moves it along.",
-        "stories": [
-          "order-confirmation"
-        ],
+        "title": "Order confirmation",
+        "stories": [],
         "calls": [
           "GET /OrderConfirmationApi/:code"
         ],
-        "admin": false
+        "notes": "Unchanged. The only wildcard route, so routes/spa.js keeps /order/* and /order answers too (rule 26). The 'Estimated ready' wording is deliberately left as it is this pass."
       },
       {
         "path": "/manage",
-        "name": "Your shop",
-        "purpose": "The owner's hub: how many orders are waiting right now, and a link to each of the three management screens.",
+        "title": "Manage",
+        "admin": true,
         "stories": [],
         "calls": [
+          "GET /AuthApi/me",
           "GET /OrderAdminApi"
         ],
-        "admin": true
+        "notes": "Unchanged."
       },
       {
         "path": "/manage/orders",
-        "name": "Orders",
-        "purpose": "The live order queue. A new paid order appears at the top on its own, with its items, pickup or delivery, the customer's name and phone, the address for delivery, and payment state. One tap moves an order from received to preparing to ready, and another closes it.",
-        "stories": [
-          "view-new-orders",
-          "update-order-status"
-        ],
+        "title": "Order queue",
+        "admin": true,
+        "stories": [],
         "calls": [
           "GET /OrderAdminApi",
           "GET /OrderAdminApi/:id",
-          "PATCH /OrderAdminApi/:id"
+          "POST /OrderAdminApi/status"
         ],
-        "admin": true
+        "notes": "CHANGED: 'Mark preparing', 'Mark ready' and 'Cancel order' save again once OrderAdminApi stops naming a Harper-owned timestamp in its write. The page's own calls do not change — it already posts to /OrderAdminApi/status. Two things on this screen are deliberately NOT touched this pass: seeded demo orders showing £0.00 per line, and new orders needing a reload to appear."
       },
       {
         "path": "/manage/menu",
-        "name": "Menu editor",
-        "purpose": "Add an item, change a name, description or price, hide something that has sold out, or remove it for good. A change shows on the customer menu straight away.",
+        "title": "Menu editor",
+        "admin": true,
         "stories": [
-          "update-menu"
+          "add-menu-item-works",
+          "edit-menu-item-works"
         ],
         "calls": [
           "GET /MenuAdminApi",
           "POST /MenuAdminApi",
-          "PATCH /MenuAdminApi/:id",
-          "DELETE /MenuAdminApi/:id"
+          "POST /MenuAdminApi/update",
+          "POST /MenuAdminApi/delete"
         ],
-        "admin": true
+        "notes": "CHANGED: adding and editing an item both save again. The page's own calls do not change. One frontend detail follows from the fix: createdAt and updatedAt now come back as epoch-millisecond numbers rather than ISO strings, because Harper assigns them, so anything on this screen that renders them must accept a number as well as a string (src/lib/format.ts) — and existing rows written before the fix may still hold a string, so both shapes must render."
       },
       {
         "path": "/manage/settings",
-        "name": "Shop settings",
-        "purpose": "Pause and resume ordering, turn pickup and delivery on or off, set the delivery fee, keep the list of postcodes you deliver to, and set the pickup and delivery time estimates. Also shows when customer details were last cleared.",
+        "title": "Shop settings",
+        "admin": true,
         "stories": [],
         "calls": [
           "GET /StoreSettingsApi",
           "PUT /StoreSettingsApi"
         ],
-        "admin": true
+        "notes": "Unchanged — this screen already saves correctly and must still save correctly after the fix."
       }
     ]
   },
@@ -289,23 +266,18 @@
     "tables": [
       {
         "table": "MenuItem",
-        "count": 14,
-        "notes": "Example pizzas, sides and drinks across three categories (Pizzas, Sides, Drinks) with whole-cent prices, sortOrder set, two marked available: false so the hidden-item case is visible. Preview only — you replace them with your own menu."
+        "count": 10,
+        "notes": "Preview only. A few items across two or three categories, at least one unavailable, so the editor has something to add to, edit and hide."
+      },
+      {
+        "table": "Order",
+        "count": 4,
+        "notes": "Preview only. Orders spread across the pending_payment, active and done queues, so every status button on /manage/orders has a row to act on. Each line carries its own name, priceCents and quantity."
       },
       {
         "table": "StoreSetting",
         "count": 1,
-        "notes": "The single row id 'store' for the preview: accepting orders, pickup and delivery both on, a 400-cent delivery fee, three example postcodes so delivery checkout can be tested, 25-minute pickup and 45-minute delivery estimates. Preview only — the published app starts from the built-in defaults (pickup on, delivery off until you add postcodes) and writes this row the first time you save settings."
-      },
-      {
-        "table": "Order",
-        "count": 9,
-        "notes": "Example orders spread across the queue: four active (received, preparing, ready), three done, one awaiting payment, one with personalDetailsClearedAt set so the cleared-details case is visible. A mix of pickup and delivery. Preview only."
-      },
-      {
-        "table": "LoopRun",
-        "count": 2,
-        "notes": "Two example rows for the loop 'clear-personal-details' with deterministic ids, so the settings screen has a last-cleared date to show. Preview only."
+        "notes": "Preview only. The single id 'store' row: ordering on, pickup and delivery on, a fee, a short postcode list and both estimates."
       }
     ],
     "accounts": [
@@ -329,134 +301,83 @@
     "entry": "/",
     "callerAuth": "none"
   },
+  "migrationPlan": {
+    "migrations": []
+  },
   "smoke": [
     "GET / 200",
     "GET /build 200",
     "GET /AuthApi/me 200",
-    "GET /MenuApi 200",
-    "GET /StoreInfoApi 200",
     "GET /order 200",
-    "GET /MenuAdminApi/ 403",
-    "GET /OrderAdminApi/ 403",
-    "GET /StoreSettingsApi/ 403"
+    "GET /MenuAdminApi 403",
+    "GET /OrderAdminApi 403",
+    "GET /StoreSettingsApi 403"
   ],
-  "claudeMd": "# CLAUDE.md — Pizza Shop Online Ordering\n\n## 1. Product\n\nA phone-first ordering site for one pizza shop. Customers browse the menu, build a basket, choose\npickup or delivery, give a name and phone number (and an address for delivery), and check out as a\nguest — there are no customer accounts. The shop owner signs in with a link emailed to them and gets\nthree screens: a live order queue, a menu editor and shop settings.\n\nDecided with the owner before the build, and load-bearing:\n\n- **Guest checkout.** No customer accounts, no order history, no password. The only person who signs\n  in is the owner, by emailed link, and only invited addresses can get an account at all\n  (`accessModel.signUp: \"invited\"`). There are no staff logins in this version.\n- **Fixed menu.** No sizes, crusts or toppings to choose. An item is a name, a description, a price\n  and a category.\n- **ASAP only.** No scheduling an order for later.\n- **Menu prices are final.** No tax line anywhere; the total is the lines plus the delivery fee.\n- **Delivery by postcode list.** The owner keeps a list of postcodes. A delivery address whose\n  postcode is not on the list is refused at checkout with an offer of pickup instead.\n- **One flat delivery fee**, set by the owner, added to every delivery order.\n- **Payment through the owner's own Stripe account.** Until that key is in place, checkout places the\n  order with `paymentStatus: 'pay_at_store'`. Once it is there, checkout creates a Stripe Checkout\n  Session and the order only joins the owner's queue when the payments kit's `StripeWebhook`\n  confirms payment. Both paths must keep working — never assume the key is present.\n- **Twelve-month retention.** Name, phone and delivery address are cleared from an order twelve\n  months after it was placed. The order, its lines and its totals are kept for good.\n\nForm factor: phone. One thing per screen, big tap targets, no side-by-side panes. Look: `studio`.\n\n## 8. Data model\n\nFour tables in `schema.graphql`. `User`, `MagicLink`, `EmailLog` and `EmailSuppression` come from the\nsign-in kit and `StripeEvent` from the payments kit, each in its own `schema.*.graphql` — never\nredeclare one, and never `@relationship` across files.\n\n- **`MenuItem`** — one row per menu item. `priceCents` is a whole-cent `Int`; no floats anywhere in\n  money. `category`, `available` and `sortOrder` are indexed because the menu is read as\n  `available == true` sorted by `category` then `sortOrder` — a list page sorting on an unindexed\n  field with no filter beside it is a 404, not a slow query.\n- **`Order`** — one row per order, `@table(audit: true)`. The audit store is not decoration: the\n  owner's queue subscribes to this table for live arrivals, and `Table.subscribe()` refuses a table\n  without one (it would otherwise perform that schema write itself at the first subscribe).\n  - `items` is a `[Any]` **snapshot** — `{menuItemId, name, priceCents, quantity}` per line, copied\n    from `MenuItem` at checkout. A later price change or a deleted item must never alter an order\n    that has already been placed, so nothing reads prices back through `menuItemId`.\n  - `code` is 32 random URL-safe characters and is the only key the confirmation page uses. It is\n    indexed; it is never derived from anything guessable.\n  - `queue` is `pending_payment` | `active` | `done` and exists so the owner's list is one indexed\n    equality plus an indexed sort rather than a scan or a `not_equal`. `status` is\n    `awaiting_payment` | `received` | `preparing` | `ready` | `collected` | `cancelled`.\n  - `paymentStatus` is `unpaid` | `paid` | `pay_at_store`; `paymentRef` holds the Stripe Checkout\n    Session id and is indexed so the webhook finds the order.\n  - `personalDetailsClearedAt` is null until the retention sweep clears the row's name, phone,\n    address and postcode; indexed, because the sweep filters on it.\n- **`StoreSetting`** — exactly one row, id `store`, read by primary key. Every reader falls back to\n  built-in defaults when it is absent (pickup on, delivery off, 400-cent fee, no postcodes, 25/45\n  minute estimates), so the published app works before the owner has ever saved. `StoreSettingsApi`\n  creates it on first save. No field is indexed: there is one row and it is fetched by id.\n- **`LoopRun`** — the template's. The nightly retention sweep writes one row per occurrence with the\n  **deterministic** id `clear-personal-details:YYYY-MM-DD`, claimed before the work is done. Nothing\n  on Harper makes a scheduled job exactly-once — every worker of every node ticks the timer and\n  leadership is a lease over last-writer-wins — so the deterministic key is what stops a second tick\n  doing the work twice. The sweep itself is idempotent anyway: it clears fields that are already\n  null-safe and skips rows where `personalDetailsClearedAt` is set.\n\nThe sweep lives behind `resources/Scheduler.js` (rule 17) as a loop in `lib/loops/`: find orders with\n`placedAt` less than the cutoff (indexed range) and `personalDetailsClearedAt == null` (nulls are\nindexed), clear the four personal fields, stamp the timestamp. It never arms in the preview copy.\n\n## 9. Auth and owner rules\n\n`accessModel`: `signIn: \"optional\"`, `signUp: \"invited\"`, `entry: \"/\"`, `callerAuth: \"none\"`. The shop\nis open to anyone; signing in is what makes you the owner. The sign-in kit supplies `AuthApi`,\n`AdminApi`, `AccountApi`, `Bootstrap` and `InboundEmailApi` — never write a second sign-in, a second\nsession cookie or a second invite flow beside them.\n\nEvery resource sets `static loadAsInstance = false` and `target.checkPermission = false` first: this\napp's people are `User` rows, not Harper roles, so the row rule in the resource IS the access control.\nAn unauthenticated refusal is a thrown `Response` 403 with `code: 'auth_required'` — never 401.\n\n| Resource | Rule |\n|---|---|\n| `MenuApi` | public, read-only, available items only |\n| `StoreInfoApi` | public, read-only, the shop-level facts a customer needs; nothing private |\n| `CheckoutApi` | public write. **Never trust the basket.** Every line is re-read from `MenuItem` and re-priced server-side; the fee and the postcode rule come from `StoreSetting`; the caller may not set totals, `status`, `queue`, `paymentStatus`, `paymentRef` or `code` |\n| `OrderConfirmationApi` | public, but reachable only by the order's own random `code`. No listing, no enumeration, one order per request |\n| `MenuAdminApi` | admin |\n| `StoreSettingsApi` | admin (reads `LoopRun` for the last-cleared date; never writes it) |\n| `OrderAdminApi` | admin — the only place customer names, phones and addresses are listed |\n\nAn admin check is role exactly `admin` on the session's user, on every method including the SSE\nstream: `connect`/`subscribe` runs the same authorization entry as a REST request, so the rule is\nwritten once in the resource and covers the live stream too.\n\nThe webhook is the payments kit's `StripeWebhook` and nothing in this app re-implements it: its\nsignature is checked over the raw bytes, it is idempotent on the Stripe event id, and it refuses in\nthe preview copy. Its only job here is to set `paymentStatus: 'paid'`, `status: 'received'` and\n`queue: 'active'` on the order whose `paymentRef` matches.\n\n## 10. Pages\n\nPhone-first, `studio` look. Eight routes; `/order/:code` is the only wildcard, so `routes/spa.js`\ncarries `/order/*` and `/order` answers too (rule 26).\n\n| Route | Who | What it does |\n|---|---|---|\n| `/` | anyone | The menu by category with a running basket. Entry route. Shows the paused message instead of the basket when ordering is off |\n| `/basket` | anyone | Quantities, removals, running total |\n| `/checkout` | anyone | Pickup or delivery; name and phone always, address and postcode for delivery only. Postcode checked against the delivery list before the order can be placed. Places the order, then sends the customer to Stripe when a key is configured |\n| `/order/:code` | anyone with the link | Confirmation: order number, lines, total, pickup or delivery, payment state, estimated ready time, and the current status |\n| `/manage` | owner | Hub: how many orders are waiting, links to the three screens |\n| `/manage/orders` | owner | The live queue. New orders arrive over the stream with a 15-second poll as the fallback; one tap advances the status |\n| `/manage/menu` | owner | Add, edit, hide and remove items; change prices |\n| `/manage/settings` | owner | Pause ordering, pickup/delivery switches, delivery fee, postcode list, time estimates, last-cleared date |\n\nEvery page guards the shape it was handed (`r?.lines ?? []`, `Array.isArray(r?.rows)`) and renders an\nempty state: the page-boot probe answers `{}` to any GET it has no fixture for, exactly as a\nhalf-deployed API would.\n",
+  "claudeMd": "# CLAUDE.md — Pizza Shop Online Ordering\n\n## 1. Product\n\nA phone-first ordering site for one pizza shop. Customers browse the menu, build a basket, choose\npickup or delivery, give a name and phone number (and an address for delivery), and check out as a\nguest — there are no customer accounts. The shop owner signs in with a link emailed to them and gets\nthree screens: a live order queue, a menu editor and shop settings.\n\nDecided with the owner before the build, and load-bearing:\n\n- **Guest checkout.** No customer accounts, no order history, no password. The only person who signs\n  in is the owner, by emailed link, and only invited addresses can get an account at all\n  (`accessModel.signUp: \"invited\"`). There are no staff logins in this version.\n- **Fixed menu.** No sizes, crusts or toppings to choose. An item is a name, a description, a price\n  and a category.\n- **ASAP only.** No scheduling an order for later.\n- **Menu prices are final.** No tax line anywhere; the total is the lines plus the delivery fee.\n- **Delivery by postcode list.** The owner keeps a list of postcodes. A delivery address whose\n  postcode is not on the list is refused at checkout with an offer of pickup instead.\n- **One flat delivery fee**, set by the owner, added to every delivery order.\n- **Payment through the owner's own Stripe account.** Until that key is in place, checkout places the\n  order with `paymentStatus: 'pay_at_store'`. Once it is there, checkout creates a Stripe Checkout\n  Session and the order only joins the owner's queue when the payments kit's `StripeWebhook`\n  confirms payment. Both paths must keep working — never assume the key is present.\n- **Twelve-month retention.** Name, phone and delivery address are cleared from an order twelve\n  months after it was placed. The order, its lines and its totals are kept for good.\n\nForm factor: phone. One thing per screen, big tap targets, no side-by-side panes. Look: `studio`.\n\n### This pass: the 400 on every admin write\n\nThe owner reported that saving a new menu item answers \"Bad Request\". The same fault breaks editing\nan item and all three order-status buttons; the owner was asked and chose to have the menu editor\nand the order-status buttons fixed together. The cause was found at plan time by comparing the\nwrites that fail against the ones that do not, and it is one line of the same mistake in two files —\n§8 states it as a rule. Nothing else in the product changes: no new table, no new field, no new\nscreen, no new route, no change to who may do what.\n\nThree reports are deliberately out of scope and must not be \"fixed on the way past\": seeded demo\norders showing £0.00 per line, new orders needing a reload to appear on `/manage/orders`, and the\n'Estimated ready' wording on the confirmation page.\n\n## 8. Data model\n\nFour tables in `schema.graphql`. `User`, `MagicLink`, `EmailLog` and `EmailSuppression` come from the\nsign-in kit and `StripeEvent` from the payments kit, each in its own `schema.*.graphql` — never\nredeclare one, and never `@relationship` across files. **No table, field, index or directive changes\nin this pass.**\n\n### The rule this pass exists for: never write a timestamp Harper owns\n\n**A field declared `@createdTime` or `@updatedTime` is assigned by Harper, in epoch milliseconds. No\nrecord this app writes may carry a key for one — not a fresh value, and not the value just read off\nthe stored row.** Harper refuses such a write with a bare `400` carrying no JSON body, which is why\nthe page showed the bare statusText `\"Bad Request\"` with no message: the refusal happened above this\napp's code, so no handler of ours ever ran and no `error` key was ever produced.\n\nThe fields are `MenuItem.createdAt`, `MenuItem.updatedAt`, `Order.updatedAt` and\n`StoreSetting.updatedAt`. The evidence that this is the fault, rather than another theory:\n\n- `MenuAdminApi` create wrote `createdAt` and `updatedAt` explicitly → 400.\n- `MenuAdminApi` update wrote `updatedAt` explicitly and carried `createdAt` through from the stored\n  row → 400, including on a save that changed no values.\n- `OrderAdminApi.applyStatus` spread the stored row (`{ ...existing, status, queue }`), and the\n  stored row carries `updatedAt` → 400, on seeded and freshly created orders alike.\n- `StoreSettingsApi.put` builds its record from a constant id plus validated fields and never names\n  `updatedAt` → 200 throughout. This is the control, and it is why the fault looked specific to two\n  resources rather than to one shape.\n- `CheckoutApi` creates an order from a fresh literal with no `updatedAt` → 200.\n- Every write to `User` succeeds, and `User.createdAt`/`User.updatedAt` are plain `String` fields\n  with no directive — the same code shape, on a table where those two names are the app's to set.\n- `data/*.yaml` carries neither field, so the seeded rows load.\n\nTwo corollaries that are easy to get wrong:\n\n- **Reads now return numbers.** Once the app stops writing them, `createdAt` and `updatedAt` come\n  back as epoch milliseconds. `adminMenuItem` and `adminOrderView` pass them straight through, so\n  anything that renders one must accept a number — and rows written before this fix may still hold\n  an ISO string, so both shapes must render. Do not convert them in the resource; format at the\n  edge.\n- **This also closes a type error.** The code was putting ISO strings into fields declared `Long`.\n  The schema is right and the code was wrong, so the schema does not move.\n\n**Why no hermetic suite caught it:** `scripts/probe/harperdb-stub.js` accepts any attribute, so\n`MenuAdminApi-probe` and `OrderAdminApi-probe` drive these exact routes and pass. That is what made\nit look as though the fault \"lives above the resource\". A probe added this pass must therefore assert\nthe **shape of the record handed to `db.<Table>.put`/`patch`** — that it carries no key named by a\n`@createdTime` or `@updatedTime` field, read from `schema.graphql` rather than hard-coded — with the\nnegative control being a record that does carry one. Asserting the stub's 200 proves nothing.\n\n**Evidence standard for this fix (CLAUDE.md §2, §6):** the change is tier-1 only when one raw\nresponse is captured whole from the live preview — status, headers and body bytes — for a menu save\nand an order-status save, with the Harper version noted. Two earlier rounds reshaped these routes on\nan untested theory; do not reshape them a third time.\n\nThe tables themselves:\n\n- **`MenuItem`** — one row per menu item. `priceCents` is a whole-cent `Int`; no floats anywhere in\n  money. `category`, `available` and `sortOrder` are indexed because the menu is read as\n  `available == true` sorted by `category` then `sortOrder` — a list page sorting on an unindexed\n  field with no filter beside it is a 404, not a slow query.\n- **`Order`** — one row per order, `@table(audit: true)`. The audit store is not decoration: the\n  owner's queue subscribes to this table for live arrivals, and `Table.subscribe()` refuses a table\n  without one.\n  - `items` is a `[Any]` **snapshot** — `{menuItemId, name, priceCents, quantity}` per line, copied\n    from `MenuItem` at checkout. A later price change or a deleted item must never alter an order\n    that has already been placed, so nothing reads prices back through `menuItemId`.\n  - `code` is 32 random URL-safe characters and is the only key the confirmation page uses.\n  - `queue` is `pending_payment` | `active` | `done`, so the owner's list is one indexed equality\n    plus a sort rather than a scan. `status` is `awaiting_payment` | `received` | `preparing` |\n    `ready` | `collected` | `cancelled`, and the queue is always derived from the status so the two\n    cannot disagree.\n  - `paymentStatus` is `unpaid` | `paid` | `pay_at_store`; `paymentRef` holds the Stripe Checkout\n    Session id and is indexed so the webhook finds the order.\n  - `personalDetailsClearedAt` is null until the retention sweep clears the row's name, phone,\n    address and postcode; indexed, because the sweep filters on it.\n- **`StoreSetting`** — exactly one row, id `store`, read by primary key. Every reader falls back to\n  built-in defaults when it is absent, so the published app works before the owner has ever saved.\n  No field is indexed: there is one row and it is fetched by id.\n- **`LoopRun`** — the template's. The nightly retention sweep writes one row per occurrence with the\n  deterministic id `clear-personal-details:YYYY-MM-DD`, claimed before the work is done.\n\nThe sweep lives behind `resources/Scheduler.js` (rule 17) as a loop in `lib/loops/`: find orders with\n`placedAt` less than the cutoff (indexed range) and `personalDetailsClearedAt == null`, clear the\nfour personal fields, stamp the timestamp. It never arms in the preview copy.\n\n## 9. Auth and owner rules\n\n`accessModel`: `signIn: \"optional\"`, `signUp: \"invited\"`, `entry: \"/\"`, `callerAuth: \"none\"`. The shop\nis open to anyone; signing in is what makes you the owner. The sign-in kit supplies `AuthApi`,\n`AdminApi`, `AccountApi`, `Bootstrap` and `InboundEmailApi` — never write a second sign-in, a second\nsession cookie or a second invite flow beside them. **Nothing in this section changes this pass**, and\nthat is a constraint on the fix: the 400 is not an access-control problem and no owner rule may be\nloosened while chasing it.\n\nEvery resource sets `static loadAsInstance = false` and `target.checkPermission = false` first: this\napp's people are `User` rows, not Harper roles, so the row rule in the resource IS the access control.\nAn unauthenticated refusal is a thrown `Response` 403 with `code: 'auth_required'` — never 401.\n\n| Resource | Rule |\n|---|---|\n| `MenuApi` | public, read-only, available items only |\n| `StoreInfoApi` | public, read-only, the shop-level facts a customer needs; nothing private |\n| `CheckoutApi` | public write. **Never trust the basket.** Every line is re-read from `MenuItem` and re-priced server-side; the fee and the postcode rule come from `StoreSetting`; the caller may not set totals, `status`, `queue`, `paymentStatus`, `paymentRef` or `code` |\n| `OrderConfirmationApi` | public, but reachable only by the order's own random `code`. No listing, no enumeration, one order per request |\n| `MenuAdminApi` | admin |\n| `StoreSettingsApi` | admin (reads `LoopRun` for the last-cleared date; never writes it) |\n| `OrderAdminApi` | admin — the only place customer names, phones and addresses are listed |\n\nAn admin check is role exactly `admin` on the session's user, re-read from the `User` row on every\ncall, on every method including the SSE stream: `connect`/`subscribe` runs the same authorization\nentry as a REST request, so the rule is written once in the resource and covers the live stream too.\n\nThe writes fixed this pass keep every rule they already enforce: `MenuAdminApi` still restates `id`\nand `createdAt` from the stored row rather than the body, and `OrderAdminApi` still writes only the\nstatus and the queue derived from it, so a body naming `code`, `items`, a total, `paymentStatus` or a\ncustomer's details changes nothing.\n\nThe webhook is the payments kit's `StripeWebhook` and nothing in this app re-implements it: its\nsignature is checked over the raw bytes, it is idempotent on the Stripe event id, and it refuses in\nthe preview copy. Its only job here is to set `paymentStatus: 'paid'`, `status: 'received'` and\n`queue: 'active'` on the order whose `paymentRef` matches.\n\n## 10. Pages\n\nPhone-first, `studio` look. Eight routes, unchanged; `/order/:code` is the only wildcard, so\n`routes/spa.js` carries `/order/*` and `/order` answers too (rule 26).\n\n| Route | Who | What it does |\n|---|---|---|\n| `/` | anyone | The menu by category with a running basket. Entry route. Shows the paused message instead of the basket when ordering is off |\n| `/basket` | anyone | Quantities, removals, running total |\n| `/checkout` | anyone | Pickup or delivery; name and phone always, address and postcode for delivery only. Postcode checked against the delivery list before the order can be placed. Places the order, then sends the customer to Stripe when a key is configured |\n| `/order/:code` | anyone with the link | Confirmation: order number, lines, total, pickup or delivery, payment state, estimated ready time, and the current status |\n| `/manage` | owner | Hub: how many orders are waiting, links to the three screens |\n| `/manage/orders` | owner | The live queue. One tap advances the status — **fixed this pass**. New orders arriving without a reload is a known gap and stays out of scope |\n| `/manage/menu` | owner | Add, edit, hide and remove items; change prices — **fixed this pass** |\n| `/manage/settings` | owner | Pause ordering, pickup/delivery switches, delivery fee, postcode list, time estimates, last-cleared date |\n\nNo page's API calls change. The one frontend consequence of the fix is that `createdAt` and\n`updatedAt` now arrive as epoch-millisecond numbers, while rows written before the fix may still hold\nISO strings, so any formatter that touches them accepts both and renders nothing rather than\n`Invalid Date` for neither.\n\nEvery page guards the shape it was handed (`r?.lines ?? []`, `Array.isArray(r?.rows)`) and renders an\nempty state: the page-boot probe answers `{}` to any GET it has no fixture for, exactly as a\nhalf-deployed API would.\n",
   "planCard": {
-    "summary": "A phone-friendly ordering site for your pizza shop: customers browse your menu and order for pickup or delivery, and you run the menu, prices and the order queue from your own screens.",
+    "summary": "I'll fix the fault that makes saving on your menu editor and your order queue come back \"Bad Request\", so adding items, changing prices and advancing orders all save again.",
     "people": [
       {
-        "title": "Customers order without an account",
-        "detail": "They pick their pizzas, give a name and phone number, and check out as a guest. Nothing to sign up for, nothing to remember."
-      },
-      {
         "title": "You sign in with a link emailed to you",
-        "detail": "Type your email address, tap the link we send, and you are in. No password. Only addresses you invite can get an account, so nobody else can reach your screens."
+        "detail": "Unchanged. Only addresses you invite can get an account, and there are no staff logins."
       },
       {
-        "title": "No separate logins for staff",
-        "detail": "You said just you for now. Staff logins can be added later if you want them."
+        "title": "Customers order as guests",
+        "detail": "Unchanged. No account, no password, no order history."
       }
     ],
     "canDo": [
       {
-        "title": "Customers see your whole menu with prices",
-        "detail": "Items grouped by category, each with a name, description and price. Built for a phone, one thing at a time."
+        "title": "Add a new item to your menu and have it save",
+        "detail": "Name, description, price and category. It appears in your list straight away, and on the public menu once you mark it available."
       },
       {
-        "title": "Pickup or delivery, chosen before checkout",
-        "detail": "Delivery asks for an address and postcode; pickup does not even show those boxes."
+        "title": "Change an existing item's price or description and have it save",
+        "detail": "The same fault broke editing as well as adding, so both are fixed together."
       },
       {
-        "title": "Delivery only to the postcodes you list",
-        "detail": "You keep the list. An address outside it is turned down at checkout, with pickup offered instead."
+        "title": "Hide or remove an item",
+        "detail": "The same save path, so this is fixed by the same change."
       },
       {
-        "title": "One delivery fee you set",
-        "detail": "Added to every delivery order and shown before the customer pays. You can change it any time."
+        "title": "Mark an order preparing, mark it ready, or cancel it",
+        "detail": "You chose to have these fixed in this pass. They fail for exactly the same reason as the menu saves, so fixing them costs almost nothing extra."
       },
       {
-        "title": "Menu prices are the final price",
-        "detail": "No separate tax line. The total is the items plus the delivery fee."
+        "title": "I found the cause before planning this, rather than guessing again",
+        "detail": "Each of these saves was sending the database its own \"created\" and \"last changed\" stamps. The database sets those two itself and rejects any save that tries to set them, with no message — which is the blank \"Bad Request\". Your shop settings screen kept working all along because it is the one save that never sends them. The fix is to stop sending them."
       },
       {
-        "title": "Card payment through your own Stripe account",
-        "detail": "This switches on the moment you connect Stripe — we ask you for the key once the app is built. Until then, checkout still takes the order and marks it pay at the shop, so you are open from day one."
-      },
-      {
-        "title": "A confirmation page for every order",
-        "detail": "Order number, what they ordered, the total, pickup or delivery, and the estimated ready time. The same link keeps showing the status as you move the order along."
-      },
-      {
-        "title": "New orders land on your screen on their own",
-        "detail": "No reloading. Each one shows the items, pickup or delivery, the customer's name and phone, the delivery address, and whether it is paid."
-      },
-      {
-        "title": "Move an order from received to preparing to ready",
-        "detail": "One tap each, then close it off when it has gone out."
-      },
-      {
-        "title": "Change the menu whenever you like",
-        "detail": "Add an item, edit a name, description or price, hide something that has sold out, or remove it. Customers see the change straight away."
-      },
-      {
-        "title": "Pause ordering when the shop is closed",
-        "detail": "Flip one switch and the site shows your message instead of the basket. Flip it back to reopen."
-      },
-      {
-        "title": "Customer details cleared after twelve months",
-        "detail": "Name, phone and address are wiped a year after the order. The order and what was in it are kept, so your history stays intact."
+        "title": "A check that stops this coming back",
+        "detail": "Two earlier attempts changed these screens on a theory that turned out to be wrong, and the existing automatic checks could not tell. I'll add one that looks at what each save actually sends, so this exact mistake fails the build in future instead of reaching you."
       }
     ],
     "screens": [
       {
-        "title": "Menu",
-        "detail": "The first thing a customer sees: your items by category, with a basket that follows them down the page."
+        "title": "Your menu editor",
+        "detail": "Same screen, same buttons. Saving works."
       },
       {
-        "title": "Basket",
-        "detail": "Change quantities, remove a line, see the total."
+        "title": "Your order queue",
+        "detail": "Same screen. \"Mark preparing\", \"Mark ready\" and \"Cancel order\" work."
       },
       {
-        "title": "Checkout",
-        "detail": "Pickup or delivery, their details, the fee and the final total, then pay."
-      },
-      {
-        "title": "Order confirmation",
-        "detail": "Order number, summary, estimated ready time, and the live status."
-      },
-      {
-        "title": "Your orders",
-        "detail": "The live queue, newest at the top, with the buttons that move an order along."
-      },
-      {
-        "title": "Your menu",
-        "detail": "Add, edit, hide and remove items; change prices."
-      },
-      {
-        "title": "Shop settings",
-        "detail": "Pause ordering, pickup and delivery switches, delivery fee, your postcode list, and how long pickup and delivery take."
+        "title": "Nothing else moves",
+        "detail": "No new screens, no new buttons, nothing added to what the app stores, and no change to who can see what."
       }
     ],
     "notInThisVersion": [
       {
-        "title": "Building your own pizza",
-        "detail": "You chose a fixed menu, so there is no picking a size, a crust or extra toppings. Each item is one price."
+        "title": "Older demo orders showing £0.00 on each line",
+        "detail": "A display problem on the order queue, in the practice data only. You chose to leave it for now."
       },
       {
-        "title": "Ordering for later",
-        "detail": "Every order is for as soon as possible. No picking a time slot."
+        "title": "New orders still needing a page reload to appear",
+        "detail": "On the order queue. You chose to leave it for now; I'd suggest it as the next thing."
       },
       {
-        "title": "Customer accounts and past orders",
-        "detail": "Guest checkout every time, so a customer cannot sign in to see what they ordered last week."
-      },
-      {
-        "title": "Messages to customers",
-        "detail": "No texts and no emails when an order is ready — the confirmation page shows the status instead. Email is only used for your own sign-in link."
-      },
-      {
-        "title": "Loyalty, several shops, driver tracking and stock",
-        "detail": "All of these you ruled out. The site is built for one shop and does not count ingredients."
+        "title": "The \"Estimated ready\" wording on the customer's confirmation page",
+        "detail": "It shows a date with no time of day. Left exactly as it is."
       }
     ]
   }

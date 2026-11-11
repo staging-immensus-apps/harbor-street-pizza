@@ -2,105 +2,93 @@
   "routes": [
     {
       "path": "/",
-      "name": "Menu",
-      "purpose": "The shop front: the whole menu by category, with a running basket. The first thing a customer sees on their phone.",
-      "stories": [
-        "browse-menu"
-      ],
+      "title": "Menu",
+      "stories": [],
       "calls": [
         "GET /MenuApi",
         "GET /StoreInfoApi"
       ],
-      "admin": false
+      "notes": "Unchanged. The menu by category with a running basket; the paused message replaces the basket when ordering is off."
     },
     {
       "path": "/basket",
-      "name": "Basket",
-      "purpose": "Review what is in the basket, change quantities, remove a line, see the running total. One job per screen, thumb-sized controls.",
+      "title": "Basket",
       "stories": [],
       "calls": [
         "GET /StoreInfoApi",
         "POST /CheckoutApi/quote"
       ],
-      "admin": false
+      "notes": "Unchanged."
     },
     {
       "path": "/checkout",
-      "name": "Checkout",
-      "purpose": "Pickup or delivery, then the details that choice needs: name and phone for both, address and postcode for delivery only. Shows the delivery fee and the final total, then places the order — sending the customer to card payment when Stripe is connected.",
-      "stories": [
-        "choose-pickup-or-delivery",
-        "pay-online"
-      ],
+      "title": "Checkout",
+      "stories": [],
       "calls": [
         "GET /StoreInfoApi",
         "POST /CheckoutApi/quote",
         "POST /CheckoutApi/order"
       ],
-      "admin": false
+      "notes": "Unchanged."
     },
     {
       "path": "/order/:code",
-      "name": "Order confirmation",
-      "purpose": "Confirmation after checkout: order number, what was ordered, the total, pickup or delivery, payment state and the estimated ready time. The same link shows the live status as the kitchen moves it along.",
-      "stories": [
-        "order-confirmation"
-      ],
+      "title": "Order confirmation",
+      "stories": [],
       "calls": [
         "GET /OrderConfirmationApi/:code"
       ],
-      "admin": false
+      "notes": "Unchanged. The only wildcard route, so routes/spa.js keeps /order/* and /order answers too (rule 26). The 'Estimated ready' wording is deliberately left as it is this pass."
     },
     {
       "path": "/manage",
-      "name": "Your shop",
-      "purpose": "The owner's hub: how many orders are waiting right now, and a link to each of the three management screens.",
+      "title": "Manage",
+      "admin": true,
       "stories": [],
       "calls": [
+        "GET /AuthApi/me",
         "GET /OrderAdminApi"
       ],
-      "admin": true
+      "notes": "Unchanged."
     },
     {
       "path": "/manage/orders",
-      "name": "Orders",
-      "purpose": "The live order queue. A new paid order appears at the top on its own, with its items, pickup or delivery, the customer's name and phone, the address for delivery, and payment state. One tap moves an order from received to preparing to ready, and another closes it.",
-      "stories": [
-        "view-new-orders",
-        "update-order-status"
-      ],
+      "title": "Order queue",
+      "admin": true,
+      "stories": [],
       "calls": [
         "GET /OrderAdminApi",
         "GET /OrderAdminApi/:id",
-        "PATCH /OrderAdminApi/:id"
+        "POST /OrderAdminApi/status"
       ],
-      "admin": true
+      "notes": "CHANGED: 'Mark preparing', 'Mark ready' and 'Cancel order' save again once OrderAdminApi stops naming a Harper-owned timestamp in its write. The page's own calls do not change — it already posts to /OrderAdminApi/status. Two things on this screen are deliberately NOT touched this pass: seeded demo orders showing £0.00 per line, and new orders needing a reload to appear."
     },
     {
       "path": "/manage/menu",
-      "name": "Menu editor",
-      "purpose": "Add an item, change a name, description or price, hide something that has sold out, or remove it for good. A change shows on the customer menu straight away.",
+      "title": "Menu editor",
+      "admin": true,
       "stories": [
-        "update-menu"
+        "add-menu-item-works",
+        "edit-menu-item-works"
       ],
       "calls": [
         "GET /MenuAdminApi",
         "POST /MenuAdminApi",
-        "PATCH /MenuAdminApi/:id",
-        "DELETE /MenuAdminApi/:id"
+        "POST /MenuAdminApi/update",
+        "POST /MenuAdminApi/delete"
       ],
-      "admin": true
+      "notes": "CHANGED: adding and editing an item both save again. The page's own calls do not change. One frontend detail follows from the fix: createdAt and updatedAt now come back as epoch-millisecond numbers rather than ISO strings, because Harper assigns them, so anything on this screen that renders them must accept a number as well as a string (src/lib/format.ts) — and existing rows written before the fix may still hold a string, so both shapes must render."
     },
     {
       "path": "/manage/settings",
-      "name": "Shop settings",
-      "purpose": "Pause and resume ordering, turn pickup and delivery on or off, set the delivery fee, keep the list of postcodes you deliver to, and set the pickup and delivery time estimates. Also shows when customer details were last cleared.",
+      "title": "Shop settings",
+      "admin": true,
       "stories": [],
       "calls": [
         "GET /StoreSettingsApi",
         "PUT /StoreSettingsApi"
       ],
-      "admin": true
+      "notes": "Unchanged — this screen already saves correctly and must still save correctly after the fix."
     }
   ]
 }

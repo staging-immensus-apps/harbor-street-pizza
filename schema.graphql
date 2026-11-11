@@ -7,6 +7,12 @@
 # The sign-in kit brings User, MagicLink, EmailLog and EmailSuppression in schema.sign-in.graphql,
 # and the payments kit brings StripeEvent in schema.payments.graphql. Never declare those here: a
 # table declared in two files is not merged, it is replaced.
+#
+# TIMESTAMPS HARPER OWNS. A field carrying @createdTime or @updatedTime is ASSIGNED BY HARPER, in
+# epoch milliseconds, which is why each one below is typed Long. Application code must never put a
+# value for such a field in a record it writes — not a fresh ISO string, and not the value it read
+# back off the stored row a moment earlier. Every field so marked is listed again in CLAUDE.md §8
+# with the rule, because this is the whole of a defect that made every admin save answer 400.
 
 # ── template-owned (additive changes only) ───────────────────────────────────
 
@@ -27,6 +33,7 @@ type LoopRun @table {
 # ── app-owned (the builder writes below this line) ───────────────────────────
 
 # One item on the shop's menu. Prices are whole cents, never floats.
+# createdAt and updatedAt are Harper's: never written by resources/MenuAdminApi.js (see the header).
 type MenuItem @table {
   id: ID @primaryKey
   name: String @indexed
@@ -43,6 +50,7 @@ type MenuItem @table {
 # orders arriving without a reload (Harper refuses subscribe on a table with no audit store).
 # Line items are a snapshot of name and price at the time of ordering, so a later price change never
 # rewrites an old order.
+# updatedAt is Harper's: a write that restates a stored row must drop it before putting it back.
 type Order @table(audit: true) {
   id: ID @primaryKey
   code: String @indexed
@@ -67,6 +75,8 @@ type Order @table(audit: true) {
 
 # A single row, id "store", holding the shop-level settings the owner edits. The resources fall back
 # to built-in defaults when the row is absent, so the app works before it is ever saved.
+# updatedAt is Harper's. StoreSettingsApi already never sends one, which is the single reason this
+# one resource's saves kept working while every other admin save answered 400.
 type StoreSetting @table {
   id: ID @primaryKey
   storeName: String
