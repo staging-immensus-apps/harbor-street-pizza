@@ -19,11 +19,15 @@ export type MenuItem = {
   category: string
 }
 
+// createdAt/updatedAt are Harper-assigned (@createdTime/@updatedTime on MenuItem, CLAUDE.md §8) and
+// come back as epoch-millisecond numbers now that MenuAdminApi stops naming them in its own writes
+// (the fix for the "Bad Request" fault); a row written before the fix may still hold the old ISO
+// string, so both shapes are real and src/lib/format.ts's day()/shortDate() read either.
 export type MenuItemAdmin = MenuItem & {
   available: boolean
   sortOrder: number
-  createdAt: string | null
-  updatedAt: string | null
+  createdAt: string | number | null
+  updatedAt: string | number | null
 }
 
 export type MenuCategory = { category: string; items: MenuItem[] }
@@ -203,7 +207,9 @@ export type AdminOrder = {
   personalDetailsClearedAt: string | null
   /** The one tap this order's screen offers next — received→preparing→ready→collected — or null. */
   nextStatus: OrderStatus | null
-  updatedAt: string | null
+  // Harper-assigned (@updatedTime on Order); epoch-millisecond number now that OrderAdminApi stops
+  // naming it in its own writes, or still an ISO string on a row touched before that fix.
+  updatedAt: string | number | null
 }
 
 export type OrderAdminListResponse = {

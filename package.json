@@ -71,6 +71,7 @@
     "stripe-acceptance": "node scripts/stripe-acceptance.js",
     "stripe-webhook-acceptance": "node scripts/stripe-webhook-acceptance.js",
     "payments-preview-acceptance": "node scripts/payments-preview-acceptance.js",
+    "managed-fields-probe": "node scripts/managed-fields-probe.js",
     "MenuApi-probe": "node scripts/MenuApi-probe.js",
     "MenuAdminApi-probe": "node scripts/MenuAdminApi-probe.js",
     "StoreInfoApi-probe": "node scripts/StoreInfoApi-probe.js",

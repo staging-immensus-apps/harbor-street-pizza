@@ -28,6 +28,7 @@ const { checker } = await import('./probe/harness.js')
 const { tables, resetTables } = await import('./probe/harperdb-stub.js')
 const { call, resource, userWithCookie, transcript, responseRulesVerdict } = await import('./probe/resource-call.js')
 const { OrderAdminApi } = await import('../resources/OrderAdminApi.js')
+const { managedFieldsIn } = await import('../lib/managed-fields.js')
 
 const { check, section, done, failures } = checker('OrderAdminApi-probe')
 
@@ -44,9 +45,40 @@ section('negative control: the leak check can say yes')
 check('a synthetic body naming a customer is caught', leaksCustomerInfo({ error: 'x', note: 'Ada Lovelace was here' }, ALL_NAMES, ALL_PHONES))
 check('a synthetic body naming a phone is caught', leaksCustomerInfo({ note: 'call 555-0300' }, ALL_NAMES, ALL_PHONES))
 check('a clean body passes', !leaksCustomerInfo({ error: 'not found' }, ALL_NAMES, ALL_PHONES))
+
+section('negative control: the managed-fields verdict can say yes (so the capture below means something)')
+check('a synthesized record naming updatedAt is caught', managedFieldsIn({ id: 'x', status: 'y', updatedAt: 123 }, 'Order').includes('updatedAt'))
+check('a clean record passes', managedFieldsIn({ id: 'x', status: 'y' }, 'Order').length === 0)
 if (failures.length) process.exit(done())
 
 resetTables()
+
+// EVERY RECORD a write ever hands db.Order.put/.patch, captured by wrapping the SAME Table
+// instance the resource writes through — db.Order and tables.Order are one object (the stub's
+// own header: databases[DEFAULT] and tables are the same object, and lib/db.js resolves db.Order
+// from there). The stub does not refuse a record naming updatedAt — nothing short of a real
+// Harper cluster does — so this capture stands in for the 400 the live app actually threw: a
+// write this probe calls "clean" that is not would be exactly the regression this probe exists to
+// catch. `checkWritesSince()` scopes the assertion to the writes a route call actually made
+// (never the fixtures this file seeds directly, which legitimately carry updatedAt).
+const orderWrites = []
+const realOrderPut = tables.Order.put.bind(tables.Order)
+tables.Order.put = async (record) => {
+  orderWrites.push({ method: 'put', record: { ...record } })
+  return realOrderPut(record)
+}
+const realOrderPatch = tables.Order.patch ? tables.Order.patch.bind(tables.Order) : null
+tables.Order.patch = async (id, data) => {
+  orderWrites.push({ method: 'patch', record: { ...data } })
+  if (realOrderPatch) return realOrderPatch(id, data)
+}
+
+/** Every write captured since `mark`, asserted clean of a field Harper owns for Order. */
+function checkWritesSince (mark, label) {
+  const made = orderWrites.slice(mark)
+  const bad = made.filter((w) => managedFieldsIn(w.record, 'Order').length > 0)
+  check(`${label}: ${made.length} write(s) via the resource name no Harper-owned field`, made.length > 0 && bad.length === 0, bad.map((w) => `${w.method} ${JSON.stringify(w.record)}`).join(' | '))
+}
 
 function makeOrder (o) {
   return {
@@ -188,6 +220,7 @@ for (const verb of ['PUT', 'PATCH']) {
   await tables.Order.put(makeOrder({ id: vA2, placedAt: '2026-02-02T00:00:00.000Z', status: 'received', queue: 'active', customerName: 'Grace Hopper', customerPhone: '555-0200' }))
   await tables.Order.put(makeOrder({ id: vD1, placedAt: '2026-02-03T00:00:00.000Z', status: 'collected', queue: 'done', customerName: 'Done Person', customerPhone: '555-0300' }))
   await tables.Order.put(makeOrder({ id: vP1, placedAt: '2026-02-04T00:00:00.000Z', status: 'awaiting_payment', queue: 'pending_payment', customerName: 'Pending Person', customerPhone: '555-0400', paymentStatus: 'unpaid' }))
+  const writeMark = orderWrites.length
 
   section(`${verb} advances status and keeps the queue in lockstep`)
   {
@@ -231,6 +264,8 @@ for (const verb of ['PUT', 'PATCH']) {
     check('…but id, code, items, totalCents, paymentStatus, paymentRef and customerPhone are all unchanged', forged.json.order.id === vP1 && forged.json.order.totalCents === before.totalCents && forged.json.order.paymentStatus === before.paymentStatus && forged.json.order.paymentRef === before.paymentRef && forged.json.order.code === before.code && forged.json.order.customerPhone === before.customerPhone && JSON.stringify(forged.json.order.items) === JSON.stringify(before.items))
     check('…and the stored row agrees', tables.Order.rows.get(vP1).id === vP1 && tables.Order.rows.get(vP1).totalCents === before.totalCents && tables.Order.rows.get(vP1).paymentStatus === before.paymentStatus && tables.Order.rows.get(vP1).paymentRef === before.paymentRef && tables.Order.rows.get(vP1).code === before.code && tables.Order.rows.get(vP1).customerPhone === before.customerPhone)
   }
+
+  checkWritesSince(writeMark, `${verb}`)
 }
 
 section('POST /OrderAdminApi/status — the route the front end actually calls, id in the body')
@@ -241,6 +276,7 @@ section('POST /OrderAdminApi/status — the route the front end actually calls, 
   await tables.Order.put(makeOrder({ id: pA1, placedAt: '2026-03-01T00:00:00.000Z', status: 'received', queue: 'active', customerName: 'Ada Lovelace', customerPhone: '555-0100' }))
   await tables.Order.put(makeOrder({ id: pD1, placedAt: '2026-03-02T00:00:00.000Z', status: 'collected', queue: 'done', customerName: 'Done Person', customerPhone: '555-0300' }))
   await tables.Order.put(makeOrder({ id: pP1, placedAt: '2026-03-03T00:00:00.000Z', status: 'awaiting_payment', queue: 'pending_payment', customerName: 'Pending Person', customerPhone: '555-0400', paymentStatus: 'unpaid' }))
+  const writeMark = orderWrites.length
 
   // received → preparing → ready → collected: each step both status and queue move, read from
   // the stored row rather than trusted from the response.
@@ -288,6 +324,8 @@ section('POST /OrderAdminApi/status — the route the front end actually calls, 
 
   const otherSub = await call(OrderAdminApi, 'POST', 'bogus', { cookie: ADMIN.cookie, body: { id: pA1, status: 'preparing' } })
   check('POST to any other sub-path → 404 (NEG)', otherSub.status === 404)
+
+  checkWritesSince(writeMark, 'POST /OrderAdminApi/status')
 }
 
 section('a demoted admin with an unexpired cookie is refused on every entry point')

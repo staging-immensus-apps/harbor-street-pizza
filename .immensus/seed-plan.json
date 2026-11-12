@@ -2,23 +2,18 @@
   "tables": [
     {
       "table": "MenuItem",
-      "count": 14,
-      "notes": "Example pizzas, sides and drinks across three categories (Pizzas, Sides, Drinks) with whole-cent prices, sortOrder set, two marked available: false so the hidden-item case is visible. Preview only — you replace them with your own menu."
+      "count": 10,
+      "notes": "Preview only. A few items across two or three categories, at least one unavailable, so the editor has something to add to, edit and hide."
+    },
+    {
+      "table": "Order",
+      "count": 4,
+      "notes": "Preview only. Orders spread across the pending_payment, active and done queues, so every status button on /manage/orders has a row to act on. Each line carries its own name, priceCents and quantity."
     },
     {
       "table": "StoreSetting",
       "count": 1,
-      "notes": "The single row id 'store' for the preview: accepting orders, pickup and delivery both on, a 400-cent delivery fee, three example postcodes so delivery checkout can be tested, 25-minute pickup and 45-minute delivery estimates. Preview only — the published app starts from the built-in defaults (pickup on, delivery off until you add postcodes) and writes this row the first time you save settings."
-    },
-    {
-      "table": "Order",
-      "count": 9,
-      "notes": "Example orders spread across the queue: four active (received, preparing, ready), three done, one awaiting payment, one with personalDetailsClearedAt set so the cleared-details case is visible. A mix of pickup and delivery. Preview only."
-    },
-    {
-      "table": "LoopRun",
-      "count": 2,
-      "notes": "Two example rows for the loop 'clear-personal-details' with deterministic ids, so the settings screen has a last-cleared date to show. Preview only."
+      "notes": "Preview only. The single id 'store' row: ordering on, pickup and delivery on, a fee, a short postcode list and both estimates."
     }
   ],
   "accounts": [

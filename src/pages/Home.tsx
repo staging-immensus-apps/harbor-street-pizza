@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Shell } from '@/components/shell'
 import { Card, CardContent } from '@/components/ui/card'
@@ -35,6 +35,18 @@ export default function Home () {
     return () => { cancelled = true }
   }, [])
 
+  // Pizza categories above drinks, everything else unchanged in between — a stable bucketed
+  // sort, not a re-alphabetization, so "Sides" keeps its position relative to other non-pizza,
+  // non-drink categories regardless of how the server happened to order them.
+  const orderedCategories = useMemo(() => {
+    function bucketOf (name: string) {
+      if (/pizza/i.test(name)) return 0
+      if (/drink/i.test(name)) return 2
+      return 1
+    }
+    return [...categories].sort((a, b) => bucketOf(a.category) - bucketOf(b.category))
+  }, [categories])
+
   const accepting = store?.acceptingOrders ?? true
   const count = basketCount(lines)
   const total = basketTotalCents(lines)
@@ -53,7 +65,7 @@ export default function Home () {
   }
 
   return (
-    <Shell title={store?.storeName || undefined}>
+    <Shell title={store?.storeName || undefined} description="We deliver within 3 miles">
       <div className={count > 0 ? 'pb-20' : undefined}>
         {error && <Alert variant="destructive">{error}</Alert>}
 
@@ -63,12 +75,12 @@ export default function Home () {
           </Alert>
         )}
 
-        {!loading && categories.length === 0 && !error && (
+        {!loading && orderedCategories.length === 0 && !error && (
           <p className="text-muted-foreground">The menu is empty right now.</p>
         )}
 
         <div className="space-y-8">
-          {categories.map((cat) => (
+          {orderedCategories.map((cat) => (
             <section key={cat.category}>
               <h2 className="mb-3 text-lg font-semibold tracking-tight">{cat.category}</h2>
               <div className="space-y-3">

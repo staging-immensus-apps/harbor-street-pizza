@@ -1,119 +1,67 @@
 {
-  "summary": "A phone-friendly ordering site for your pizza shop: customers browse your menu and order for pickup or delivery, and you run the menu, prices and the order queue from your own screens.",
+  "summary": "I'll fix the fault that makes saving on your menu editor and your order queue come back \"Bad Request\", so adding items, changing prices and advancing orders all save again.",
   "people": [
     {
-      "title": "Customers order without an account",
-      "detail": "They pick their pizzas, give a name and phone number, and check out as a guest. Nothing to sign up for, nothing to remember."
-    },
-    {
       "title": "You sign in with a link emailed to you",
-      "detail": "Type your email address, tap the link we send, and you are in. No password. Only addresses you invite can get an account, so nobody else can reach your screens."
+      "detail": "Unchanged. Only addresses you invite can get an account, and there are no staff logins."
     },
     {
-      "title": "No separate logins for staff",
-      "detail": "You said just you for now. Staff logins can be added later if you want them."
+      "title": "Customers order as guests",
+      "detail": "Unchanged. No account, no password, no order history."
     }
   ],
   "canDo": [
     {
-      "title": "Customers see your whole menu with prices",
-      "detail": "Items grouped by category, each with a name, description and price. Built for a phone, one thing at a time."
+      "title": "Add a new item to your menu and have it save",
+      "detail": "Name, description, price and category. It appears in your list straight away, and on the public menu once you mark it available."
     },
     {
-      "title": "Pickup or delivery, chosen before checkout",
-      "detail": "Delivery asks for an address and postcode; pickup does not even show those boxes."
+      "title": "Change an existing item's price or description and have it save",
+      "detail": "The same fault broke editing as well as adding, so both are fixed together."
     },
     {
-      "title": "Delivery only to the postcodes you list",
-      "detail": "You keep the list. An address outside it is turned down at checkout, with pickup offered instead."
+      "title": "Hide or remove an item",
+      "detail": "The same save path, so this is fixed by the same change."
     },
     {
-      "title": "One delivery fee you set",
-      "detail": "Added to every delivery order and shown before the customer pays. You can change it any time."
+      "title": "Mark an order preparing, mark it ready, or cancel it",
+      "detail": "You chose to have these fixed in this pass. They fail for exactly the same reason as the menu saves, so fixing them costs almost nothing extra."
     },
     {
-      "title": "Menu prices are the final price",
-      "detail": "No separate tax line. The total is the items plus the delivery fee."
+      "title": "I found the cause before planning this, rather than guessing again",
+      "detail": "Each of these saves was sending the database its own \"created\" and \"last changed\" stamps. The database sets those two itself and rejects any save that tries to set them, with no message — which is the blank \"Bad Request\". Your shop settings screen kept working all along because it is the one save that never sends them. The fix is to stop sending them."
     },
     {
-      "title": "Card payment through your own Stripe account",
-      "detail": "This switches on the moment you connect Stripe — we ask you for the key once the app is built. Until then, checkout still takes the order and marks it pay at the shop, so you are open from day one."
-    },
-    {
-      "title": "A confirmation page for every order",
-      "detail": "Order number, what they ordered, the total, pickup or delivery, and the estimated ready time. The same link keeps showing the status as you move the order along."
-    },
-    {
-      "title": "New orders land on your screen on their own",
-      "detail": "No reloading. Each one shows the items, pickup or delivery, the customer's name and phone, the delivery address, and whether it is paid."
-    },
-    {
-      "title": "Move an order from received to preparing to ready",
-      "detail": "One tap each, then close it off when it has gone out."
-    },
-    {
-      "title": "Change the menu whenever you like",
-      "detail": "Add an item, edit a name, description or price, hide something that has sold out, or remove it. Customers see the change straight away."
-    },
-    {
-      "title": "Pause ordering when the shop is closed",
-      "detail": "Flip one switch and the site shows your message instead of the basket. Flip it back to reopen."
-    },
-    {
-      "title": "Customer details cleared after twelve months",
-      "detail": "Name, phone and address are wiped a year after the order. The order and what was in it are kept, so your history stays intact."
+      "title": "A check that stops this coming back",
+      "detail": "Two earlier attempts changed these screens on a theory that turned out to be wrong, and the existing automatic checks could not tell. I'll add one that looks at what each save actually sends, so this exact mistake fails the build in future instead of reaching you."
     }
   ],
   "screens": [
     {
-      "title": "Menu",
-      "detail": "The first thing a customer sees: your items by category, with a basket that follows them down the page."
+      "title": "Your menu editor",
+      "detail": "Same screen, same buttons. Saving works."
     },
     {
-      "title": "Basket",
-      "detail": "Change quantities, remove a line, see the total."
+      "title": "Your order queue",
+      "detail": "Same screen. \"Mark preparing\", \"Mark ready\" and \"Cancel order\" work."
     },
     {
-      "title": "Checkout",
-      "detail": "Pickup or delivery, their details, the fee and the final total, then pay."
-    },
-    {
-      "title": "Order confirmation",
-      "detail": "Order number, summary, estimated ready time, and the live status."
-    },
-    {
-      "title": "Your orders",
-      "detail": "The live queue, newest at the top, with the buttons that move an order along."
-    },
-    {
-      "title": "Your menu",
-      "detail": "Add, edit, hide and remove items; change prices."
-    },
-    {
-      "title": "Shop settings",
-      "detail": "Pause ordering, pickup and delivery switches, delivery fee, your postcode list, and how long pickup and delivery take."
+      "title": "Nothing else moves",
+      "detail": "No new screens, no new buttons, nothing added to what the app stores, and no change to who can see what."
     }
   ],
   "notInThisVersion": [
     {
-      "title": "Building your own pizza",
-      "detail": "You chose a fixed menu, so there is no picking a size, a crust or extra toppings. Each item is one price."
+      "title": "Older demo orders showing £0.00 on each line",
+      "detail": "A display problem on the order queue, in the practice data only. You chose to leave it for now."
     },
     {
-      "title": "Ordering for later",
-      "detail": "Every order is for as soon as possible. No picking a time slot."
+      "title": "New orders still needing a page reload to appear",
+      "detail": "On the order queue. You chose to leave it for now; I'd suggest it as the next thing."
     },
     {
-      "title": "Customer accounts and past orders",
-      "detail": "Guest checkout every time, so a customer cannot sign in to see what they ordered last week."
-    },
-    {
-      "title": "Messages to customers",
-      "detail": "No texts and no emails when an order is ready — the confirmation page shows the status instead. Email is only used for your own sign-in link."
-    },
-    {
-      "title": "Loyalty, several shops, driver tracking and stock",
-      "detail": "All of these you ruled out. The site is built for one shop and does not count ingredients."
+      "title": "The \"Estimated ready\" wording on the customer's confirmation page",
+      "detail": "It shows a date with no time of day. Left exactly as it is."
     }
   ]
 }

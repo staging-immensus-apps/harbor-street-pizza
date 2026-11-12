@@ -7,16 +7,17 @@
 //   POST   /OrderAdminApi/status   { id, status }              advance the status; the queue is derived
 //                                                              from it so the two can never disagree.
 //                                                              THIS is the route the front end calls.
-//   UNRESOLVED: this shape was adopted on the theory that Harper refuses a write whose path names a
-//   record, and that theory is WRONG — QA on this build found `POST /OrderAdminApi/status`, which has
-//   no record segment, answering 400 on two separate orders exactly as `PUT /OrderAdminApi/:id` did.
-//   An earlier round had already discarded "the verb is the variable" (PATCH→PUT changed nothing).
-//   The cause of the 400 is NOT KNOWN; CLAUDE.md §7 "OPEN QUESTION" records what evidence is missing
-//   (one raw failing response plus the server log line, and the Harper version). The action route is
-//   kept because it is no worse than what it replaced, not because it is known to be right.
 //   PUT    /OrderAdminApi/:id   { status }                     kept working as an alias for anything that
 //   PATCH  /OrderAdminApi/:id   { status }                     still reaches them; same shared merge.
 //   connect (SSE)                                             live Order arrivals/changes, admin-only
+//
+// RESOLVED: every status write used to answer a bare 400 with no JSON body. `Order.updatedAt`
+// carries `@updatedTime`, so Harper assigns it and refuses any record that names it —
+// `applyStatus()`'s merge was `{ ...existing, status, queue }`, and the SPREAD of the stored row
+// names `updatedAt` just as surely as writing it by hand would, because a stored row has one. The
+// route shape was never the fault — the action route stays exactly as it is, because the front end
+// calls it — and the fix is `lib/managed-fields.js`'s `withoutManaged()` on the spread before the
+// write, below.
 //
 // No DELETE: an order is created by CheckoutApi and never removed.
 
@@ -25,6 +26,7 @@ import { db } from '../lib/db.js'
 import { requireAdmin } from '../lib/auth.js'
 import { json, segmentsOf, queryParams, runAuthed } from '../lib/http.js'
 import { adminOrderView, queueForStatus, QUEUES, QUEUE_ACTIVE, OWNER_SETTABLE_STATUSES } from '../lib/orders.js'
+import { withoutManaged } from '../lib/managed-fields.js'
 
 export class OrderAdminApi extends Resource {
   static loadAsInstance = false
@@ -125,8 +127,11 @@ async function applyStatus (id, body) {
   }
   // Only status and the queue it implies are ever written: everything else — id, code,
   // items, every total, paymentStatus, paymentRef, the customer's details — is restated
-  // from the stored row, so a body carrying those fields changes nothing.
-  const row = { ...existing, status, queue: queueForStatus(status) }
+  // from the stored row, so a body carrying those fields changes nothing. withoutManaged()
+  // strips updatedAt off the spread first: the stored row HAS one, and the spread would
+  // otherwise name it, which is the whole of the 400 this resource used to answer.
+  const row = { ...withoutManaged(existing, 'Order'), status, queue: queueForStatus(status) }
   await db.Order.put(row)
-  return json({ order: adminOrderView(row) })
+  const stored = await db.Order.get(id)
+  return json({ order: adminOrderView(stored ?? row) })
 }
