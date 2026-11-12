@@ -1,14 +1,28 @@
 {
-  "verdict": "approve",
+  "verdict": "changes",
+  "designFidelity": "matches",
+  "summary": "The core change is sound and correctly scoped: not writing a field declared @createdTime/@updatedTime is right by the schema's own semantics (the code was also putting ISO strings into Long columns), and withoutManaged() is applied at every call site that restates a stored row — MenuAdminApi.updateItem, OrderAdminApi.applyStatus, lib/retention.js's sweep, and both lib/stripe-events.js handlers. I checked the writers the diff does NOT touch and they are genuinely safe: CheckoutApi builds fresh literals (line 159 spreads the in-memory pendingRow, not a row read back), StoreSettingsApi builds from a constant id plus validated fields, and the User writes that name updatedAt target plain String columns in the sign-in kit's schema, correctly excluded from MANAGED_FIELDS. Auth is untouched and intact: requireAdmin(this) is still the first statement of every entry point on both changed resources including connect(), target.checkPermission = false is set on each method, refusals remain the thrown 403, and no public resource changed. No secrets, no new dependencies, no new fetch targets, no injection-shaped copy, no schema field or index changes, no race (both merges are idempotent single-row writes of whitelisted values, and the Stripe handler keeps its event-id ledger and its paymentStatus guard). Probe captures are installed after the only resetTables() call in each file and self-guard with a length > 0 assertion, and the negative controls are synthesized rather than text-anchored. Three things to fix below; none is a hole anyone can walk through.",
   "findings": [
     {
-      "file": "src/pages/Home.tsx",
-      "line": 68,
-      "rule": "other",
+      "file": "deploy/smoke.txt",
+      "line": 4,
+      "rule": "convention",
+      "severity": "major",
+      "message": "Two rows were deleted from the post-deploy smoke table — `GET /MenuApi 200` and `GET /StoreInfoApi 200` — in a pass whose own CLAUDE.md entry states 'Nothing else in the product changes: no new table, no new field, no new screen, no new route'. These are the two public reads the customer-facing home page is built on, and the smoke table is how rule 12 proves a deploy serves them. deploy/smoke.txt is also outside this build's writable areas. Nothing about the managed-timestamp fix requires touching either row; restore both. (The trailing-slash normalisation on the three 403 rows is harmless either way.)"
+    },
+    {
+      "file": "lib/managed-fields.js",
+      "line": 27,
+      "rule": "design",
+      "severity": "major",
+      "message": "MANAGED_FIELDS is hand-transcribed, and the guarantee stated for it does not exist. The module comment says 'this list and the schema are checked against each other by the probes, not by an import', and the CLAUDE.md §8 text added in this same diff requires the probe to assert no key 'named by a @createdTime or @updatedTime field, read from schema.graphql rather than hard-coded'. No probe reads schema.graphql: MenuAdminApi-probe and OrderAdminApi-probe both import managedFieldsIn and assert against the hard-coded map, so the map is checked against itself. The drift is one-directional and silent — adding @updatedTime to a new field or a new table leaves the list stale and reintroduces exactly this 400, with every probe still green. Either derive MANAGED_FIELDS from schema.graphql in a suite that parses the SDL, or add one assertion that the map equals the set of @createdTime/@updatedTime fields parsed out of schema.graphql, and drop the claim from the comment until it does."
+    },
+    {
+      "file": "CLAUDE.md",
+      "line": 590,
+      "rule": "convention",
       "severity": "minor",
-      "message": "The hard-coded hero line \"We deliver within 3 miles\" states a delivery rule this app does not implement: delivery is decided by the owner's postcode list in StoreSetting (CLAUDE.md §1, §8), not by a radius, and the text is not read from StoreInfoApi, so the owner cannot change it without a code change. Non-blocking and the owner's copy to keep if they want it, but worth surfacing — a customer outside the postcode list but within 3 miles is told one thing and refused at checkout."
+      "message": "The §7 entry is rewritten from 'OPEN QUESTION, NOT A MEASUREMENT' to a flat 'RESOLVED', asserting a Harper behaviour ('refused 400 Bad Request with no body') with no Harper version and no date — §2 requires the version and the date on any claim about Harper's behaviour, and that omission is named in the entry this diff deletes as the reason the earlier theory was discarded. The same diff then writes, a few lines later in §8, that 'the change is tier-1 only when one raw response is captured whole from the live preview ... with the Harper version noted', so the document both declares the matter closed and records that the evidence closing it was not taken. This app has already paid for two confident theories; the code change stands on its own (writing a Harper-assigned field was wrong regardless of what the refusal looks like), so state the mechanism as the best-supported inference with its evidence tier, or carry the version and the captured response."
     }
-  ],
-  "designFidelity": "matches",
-  "summary": "UI-only diff on src/pages/Home.tsx: a memoized bucketed category sort (pizza first, drinks last, everything else stable in between) and a description line passed to Shell. No resource, lib, route, schema, data, config or package.json change, so no auth scope, auth response, secret, race, egress or dependency surface is touched. Array.prototype.sort is stable, so the comment's claim that non-pizza/non-drink categories keep their relative order holds; QA's observation that Sides now precedes Drinks is the intended drinks-last bucket, an acceptance-wording matter for the owner rather than a defect in the platform's work. Conventions hold: no semicolons, single quotes, 2-space indent, no new component outside src/components/ui, no hard-coded colours. The look seam (src/index.css) is untouched, so the chosen `studio` look is still what the app wears. No instruction-shaped text in the new copy, no fetch added. run_check lint passes."
+  ]
 }
