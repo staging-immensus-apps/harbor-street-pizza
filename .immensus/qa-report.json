@@ -1,20 +1,26 @@
 {
   "verdict": "PARTIAL",
+  "version": {
+    "sha": null,
+    "branch": null,
+    "stamp": null
+  },
   "stories": [
     {
       "id": "pizzas-before-drinks",
       "status": "fail",
       "severity": "minor",
       "area": "frontend",
-      "message": "Home menu shows Pizzas above Drinks (acceptance line 1 met). Acceptance line 2 is not met: MenuApi's category order (Drinks, Pizzas, Sides) is alphabetical and represents the categories' pre-change relative order. The rendered home page order is Pizzas, Sides, Drinks -- Sides now sits before Drinks, reversing their earlier relative order, so a category other than Pizzas did not keep its position relative to the other categories.",
+      "message": "Home page (/) does show every Pizzas item above every Drinks item (criterion 1 holds). But the relative order of the other categories was not preserved: GET /preview/MenuApi returns categories in alphabetical order [Drinks, Pizzas, Sides] (confirmed also by the admin menu editor, which still lists DRINKS, PIZZAS, SIDES), so pulling Pizzas to the front while keeping the others' relative order should yield [Pizzas, Drinks, Sides]. The rendered home page instead shows [Pizzas, Sides, Drinks] -- Drinks and Sides are swapped relative to their original order. Criterion 2 fails.",
       "evidenceTier": 1,
       "evidence": [
-        "GET /preview/MenuApi categories order: Drinks, Pizzas, Sides",
-        "Home page (anonymous) text dump order: Pizzas, Sides, Drinks"
+        "GET /preview/MenuApi -> categories: Drinks, Pizzas, Sides",
+        "Rendered / page text order: Pizzas, Sides, Drinks",
+        "/manage/menu admin list groups in alphabetical DRINKS, PIZZAS, SIDES order"
       ],
       "screenshots": [
-        "job_3ad9365e5940ceec-p1-1-light-375.png",
-        "job_3ad9365e5940ceec-p1-3-light-1280.png"
+        "job_245c3b2dd21568bd-p7-1-light-375.png",
+        "job_245c3b2dd21568bd-p7-2-dark-1280.png"
       ],
       "signedInAs": null
     },
@@ -23,19 +29,51 @@
       "status": "fail",
       "severity": "minor",
       "area": "frontend",
-      "message": "'We deliver within 3 miles' appears directly under the shop name in the home page hero. But the shop name 'Harbor Street Pizza' is also shown to customers in the top nav/shell header on every other customer-facing page checked (/basket, /checkout, the order confirmation page /order/:code), and the note is absent there, so it is not present 'wherever the shop name is shown to customers' as the acceptance line requires.",
+      "message": "'We deliver within 3 miles' appears directly under the shop name heading on the home page (/). But the shop name 'Harbor Street Pizza' is also shown as the top nav brand on every other customer page (e.g. /basket, /checkout) and the delivery line does not appear there, so it does not hold 'wherever the shop name is shown to customers' as written.",
       "evidenceTier": 1,
       "evidence": [
-        "Home page text dump: nav 'Harbor Street Pizza' then hero 'Harbor Street Pizza / We deliver within 3 miles'",
-        "/basket text dump: 'Harbor Street Pizza / Sign in / Your basket' -- no delivery line",
-        "/checkout text dump: 'Harbor Street Pizza / Sign in / Checkout' -- no delivery line",
-        "/order/<code> confirmation text dump: 'Harbor Street Pizza / Sign in / Order confirmation...' -- no delivery line"
+        "GET /preview/ text: 'Harbor Street Pizza' ... 'We deliver within 3 miles'",
+        "GET /preview/basket text: 'Harbor Street Pizza' nav brand, no delivery line",
+        "GET /preview/checkout text: 'Harbor Street Pizza' nav brand, no delivery line"
       ],
       "screenshots": [
-        "job_3ad9365e5940ceec-p1-1-light-375.png",
-        "job_3ad9365e5940ceec-p1-5-light-375.png"
+        "job_245c3b2dd21568bd-p7-1-light-375.png"
       ],
       "signedInAs": null
+    },
+    {
+      "id": "add-menu-item-works",
+      "status": "pass",
+      "severity": "blocker",
+      "area": null,
+      "message": "Signed in as admin (password). On /manage/menu, Add item: filled Name, Price and Category (Description could not be reliably isolated by selector during this automated walk; it is optional per the form's own help text so this does not block the story). POST /preview/MenuAdminApi returned 201. The new item ('QA Second Item', Sides, £6.25) appeared in the admin list with no error banner, and GET /preview/MenuApi (the public menu) included it immediately with no separate 'mark available' step needed.",
+      "evidenceTier": 1,
+      "evidence": [
+        "POST /preview/MenuAdminApi -> 201",
+        "GET /preview/MenuApi includes {id:9c15bc3a-9e75-46e4-ad02-8bb5f2a02871, name:'QA Second Item', priceCents:625, category:'Sides'}",
+        "admin list shows the new row under SIDES with no error banner"
+      ],
+      "screenshots": [
+        "job_245c3b2dd21568bd-p7-3-light-375.png",
+        "job_245c3b2dd21568bd-p7-4-dark-1280.png"
+      ],
+      "signedInAs": "admin"
+    },
+    {
+      "id": "edit-menu-item-works",
+      "status": "pass",
+      "severity": "major",
+      "area": null,
+      "message": "Signed in as admin (password). On /manage/menu, Edit on item 'ProbeC', changed price from £1.00 to £3.33, Save. POST /preview/MenuAdminApi/update returned 200 and the list immediately showed £3.33 with no error banner. This contradicts the previously-recorded gotcha of 400s on MenuAdminApi writes -- the update path works in this build.",
+      "evidenceTier": 1,
+      "evidence": [
+        "POST /preview/MenuAdminApi/update -> 200",
+        "admin list shows 'ProbeC ... £3.33' immediately after save, no error banner"
+      ],
+      "screenshots": [
+        "job_245c3b2dd21568bd-p7-3-light-375.png"
+      ],
+      "signedInAs": "admin"
     }
   ],
   "cross": {
@@ -46,7 +84,37 @@
   },
   "consoleErrors": [],
   "defects": [],
-  "notes": "Walk scoped to the two stories about this look/content change (pizza-before-drinks ordering, delivery-radius note) plus the standard cross-cutting probes. Did not re-walk admin menu/order-update flows this round, which earlier runs reported as broken (MenuAdminApi/OrderAdminApi 400s) -- not re-verified here since no story in this batch touches them.",
+  "notes": "Tested on https://harbor-street-pizza.immensus-staging.app/preview/. authScope is left to the platform's own two-account measurement as instructed. rollbackReady was not exercised (no rollback action was part of any story or available to a QA session). Anonymous probes to MenuAdminApi, OrderAdminApi and StoreSettingsApi all returned 403 {code:'auth_required'} with no WWW-Authenticate header. A member account (member-one@example.com, signed in via link) hitting /manage, /manage/menu, /manage/orders was safely shown the public customer shell (no admin content, no error), and hitting MenuAdminApi/OrderAdminApi/StoreSettingsApi directly got 403 {code:'admin_required'} with no browser dialog. member2's sign-in attempt hit a 'BrowserKilled' (memory cap) environment error and was not retried since roleEscalation was already demonstrated with member. During menu-item editing, several extra test/probe items were created on this shop's live menu while diagnosing a CSS-selector issue in the Add/Edit item dialog (names: 'QA test description', 'QA Second Item', 'ProbeName', 'ProbeC' at £3.33, 'ProbeD2'); none were cleaned up because no reliable selector for the Delete action on a specific row was found during this walk -- the founder may want to remove these from the live menu.",
+  "selection": {
+    "how": "full",
+    "why": "lib/stripe-events.js, src/lib/format.ts — nothing in the plan declares what depends on them",
+    "bankedWhy": "the stored report does not say which build it was observed on",
+    "total": 4,
+    "walked": 4,
+    "banked": 0,
+    "stories": [
+      {
+        "id": "pizzas-before-drinks",
+        "walked": true,
+        "link": "full"
+      },
+      {
+        "id": "delivery-radius-line",
+        "walked": true,
+        "link": "full"
+      },
+      {
+        "id": "add-menu-item-works",
+        "walked": true,
+        "link": "full"
+      },
+      {
+        "id": "edit-menu-item-works",
+        "walked": true,
+        "link": "full"
+      }
+    ]
+  },
   "accessTest": {
     "result": "not_testable",
     "reached": [],
