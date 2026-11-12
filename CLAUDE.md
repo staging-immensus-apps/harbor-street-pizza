@@ -602,7 +602,9 @@ each job. These are the template's, for hazards an app's own code can hit and §
   rule: every writer of an owner-stamped table passes its record through `withoutManaged(record,
   table)` from `lib/managed-fields.js`, and nothing ever sets one of those fields → enforced by:
   `managedFieldsIn()` asserted over every captured write in `MenuAdminApi-probe` and
-  `OrderAdminApi-probe`, each with a negative control.
+  `OrderAdminApi-probe`, each with a negative control — and by `managed-fields-probe`, which parses
+  every `schema*.graphql` and requires `MANAGED_FIELDS` to equal the `@createdTime`/`@updatedTime`
+  fields it finds, because those two probes read that map and so cannot check it against itself.
   - *Why no suite caught it for two rounds*: `scripts/probe/harperdb-stub.js` accepts any field,
     so the probes drove the same routes in-process and passed. A hermetic probe cannot see a
     refusal the double does not model — so the probes now assert the **shape of the record written**
@@ -665,10 +667,12 @@ Two corollaries that are easy to get wrong:
 
 **Why no hermetic suite caught it:** `scripts/probe/harperdb-stub.js` accepts any attribute, so
 `MenuAdminApi-probe` and `OrderAdminApi-probe` drive these exact routes and pass. That is what made
-it look as though the fault "lives above the resource". A probe added this pass must therefore assert
-the **shape of the record handed to `db.<Table>.put`/`patch`** — that it carries no key named by a
-`@createdTime` or `@updatedTime` field, read from `schema.graphql` rather than hard-coded — with the
-negative control being a record that does carry one. Asserting the stub's 200 proves nothing.
+it look as though the fault "lives above the resource". The probes therefore assert the **shape of
+the record handed to `db.<Table>.put`/`patch`** — that it carries no key named by a `@createdTime` or
+`@updatedTime` field — with the negative control being a record that does carry one. Asserting the
+stub's 200 proves nothing. The list of those field names is `MANAGED_FIELDS`, and because the write
+assertions read it, it cannot also be their reference: `managed-fields-probe` is the one suite that
+reads `schema.graphql` itself and requires the map to equal what the SDL declares.
 
 **Evidence standard for this fix (CLAUDE.md §2, §6):** the change is tier-1 only when one raw
 response is captured whole from the live preview — status, headers and body bytes — for a menu save
