@@ -793,4 +793,4 @@ half-deployed API would.
 - 2026-11-11: **Can customers schedule a pickup or delivery for later, or should every order be for as soon as possible?** → As soon as possible only <!-- decision:order_timing -->
 - 2026-11-11: **Taking payments needs your Stripe account. I'll build invite codes now and add checkout when you connect Stripe. Is that right?** → Yes, invite codes for now <!-- decision:payments -->
 - 2026-11-11: **Will anyone besides you need their own login to see and manage incoming orders, like kitchen staff?** → Just me <!-- decision:staff_access -->
-
+- 2026-11-12: **You reported that saving a new menu item fails with a "Bad Request" error — I'll fix that, and editing an existing item, which fails the same way. Testing found the same kind of failure on your order queue: "Mark preparing", "Mark ready" and "Cancel order" all fail too. How much should I fix in this pass?** → The menu editor and the order status buttons <!-- decision:architect:fix_scope -->
