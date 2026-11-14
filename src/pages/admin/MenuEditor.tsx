@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Shell } from '@/components/shell'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -7,8 +7,41 @@ import { Label } from '@/components/ui/label'
 import { Alert } from '@/components/ui/alert'
 import { Dialog } from '@/components/ui/dialog'
 import { listMenuItemsAdmin, createMenuItem, updateMenuItem, deleteMenuItem } from '@/api/menu-admin'
+import { uploadMenuPhoto, removeMenuPhoto } from '@/api/menu-photo-admin'
 import { money, errorText } from '@/lib/format'
 import type { MenuItemAdmin, MenuItemWrite } from '@/api/types'
+
+// A chosen-but-not-yet-uploaded photo for whichever dialog (Add or Edit) is open — only one of
+// those is ever open at a time (Dialog only mounts its children while `open`), so one slot of
+// state serves both and there is never a stale selection to disambiguate.
+type PendingPhoto = { file: File; previewUrl: string }
+
+/** Draws a chosen file to a canvas and re-encodes it as JPEG no wider than 1200px (the plan's own
+ * steps), so a phone photo arrives small regardless of its source format. */
+async function resizeToJpeg (file: File): Promise<{ dataBase64: string; contentType: 'image/jpeg' }> {
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error('Could not read that image'))
+      img.src = objectUrl
+    })
+    const scale = Math.min(1, 1200 / image.naturalWidth)
+    const width = Math.round(image.naturalWidth * scale)
+    const height = Math.round(image.naturalHeight * scale)
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Could not prepare that image')
+    ctx.drawImage(image, 0, 0, width, height)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+    return { dataBase64: dataUrl.slice(dataUrl.indexOf(',') + 1), contentType: 'image/jpeg' }
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
 
 type FormState = {
   name: string
@@ -58,6 +91,10 @@ export default function MenuEditor () {
   const [toggleBusyId, setToggleBusyId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
+  const [pendingPhoto, setPendingPhoto] = useState<PendingPhoto | null>(null)
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => {
     let cancelled = false
     listMenuItemsAdmin()
@@ -80,15 +117,24 @@ export default function MenuEditor () {
     return groups
   }, [items])
 
+  function clearPendingPhoto () {
+    setPendingPhoto((prev) => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl)
+      return null
+    })
+  }
+
   function openAdd () {
     setForm(BLANK_FORM)
     setFormError(null)
+    clearPendingPhoto()
     setAddOpen(true)
   }
 
   function openEdit (item: MenuItemAdmin) {
     setForm(formFromItem(item))
     setFormError(null)
+    clearPendingPhoto()
     setEditItem(item)
   }
 
@@ -96,6 +142,48 @@ export default function MenuEditor () {
     setAddOpen(false)
     setEditItem(null)
     setFormError(null)
+    clearPendingPhoto()
+  }
+
+  function handlePhotoChosen (e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // lets the same file be chosen again later
+    if (!file) return
+    setPendingPhoto((prev) => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl)
+      return { file, previewUrl: URL.createObjectURL(file) }
+    })
+  }
+
+  // Runs after the item itself is already saved (submitAdd/submitEdit), so a failure here is
+  // reported without undoing that save — the plan's own order of operations.
+  async function uploadPendingPhotoFor (menuItemId: string, file: File) {
+    setActionError(null)
+    try {
+      const { dataBase64, contentType } = await resizeToJpeg(file)
+      await uploadMenuPhoto(menuItemId, { dataBase64, contentType })
+      const r = await listMenuItemsAdmin()
+      setItems(r?.items ?? [])
+    } catch (err) {
+      setActionError(errorText(err, 'Could not upload that photo'))
+    }
+  }
+
+  async function removePhoto (item: MenuItemAdmin) {
+    setActionError(null)
+    setPhotoBusy(true)
+    try {
+      await removeMenuPhoto(item.id)
+      const r = await listMenuItemsAdmin()
+      const freshItems = r?.items ?? []
+      setItems(freshItems)
+      setEditItem((prev) => (prev && prev.id === item.id ? freshItems.find((it) => it.id === item.id) ?? prev : prev))
+      clearPendingPhoto()
+    } catch (err) {
+      setActionError(errorText(err, 'Could not remove that photo'))
+    } finally {
+      setPhotoBusy(false)
+    }
   }
 
   function buildBody (): MenuItemWrite | null {
@@ -121,11 +209,14 @@ export default function MenuEditor () {
     try {
       const r = await createMenuItem({ ...body, available: true })
       setItems((prev) => [...prev, r.item])
+      const photo = pendingPhoto
       closeDialogs()
+      if (photo) await uploadPendingPhotoFor(r.item.id, photo.file)
     } catch (err) {
       setFormError(errorText(err, 'Could not add that item'))
     } finally {
       setSubmitting(false)
+      clearPendingPhoto()
     }
   }
 
@@ -138,11 +229,14 @@ export default function MenuEditor () {
     try {
       const r = await updateMenuItem(editItem.id, body)
       setItems((prev) => prev.map((it) => (it.id === r.item.id ? r.item : it)))
+      const photo = pendingPhoto
       closeDialogs()
+      if (photo) await uploadPendingPhotoFor(r.item.id, photo.file)
     } catch (err) {
       setFormError(errorText(err, 'Could not save that item'))
     } finally {
       setSubmitting(false)
+      clearPendingPhoto()
     }
   }
 
@@ -175,6 +269,37 @@ export default function MenuEditor () {
   }
 
   const livePriceCents = centsFrom(form.price)
+
+  // Shared by the Add and Edit dialogs: `item` is null in Add (an item never has a photo before it
+  // exists), the saved photo when the edited item has one and nothing new has been chosen yet, or a
+  // chosen-but-unsaved file's preview — in that priority order.
+  function renderPhotoField (item: MenuItemAdmin | null) {
+    if (item && item.photoUpdatedAt && !pendingPhoto) {
+      return (
+        <div className="flex items-center gap-3">
+          <img src={item.photoUrl ?? undefined} className="h-24 w-24 rounded-md border object-cover" alt="" />
+          <div className="flex flex-col gap-2">
+            <Button variant="outline" size="sm" disabled={photoBusy} onClick={() => fileInputRef.current?.click()}>Replace</Button>
+            <Button variant="outline" size="sm" disabled={photoBusy} onClick={() => removePhoto(item)}>Remove</Button>
+          </div>
+        </div>
+      )
+    }
+    if (pendingPhoto) {
+      return (
+        <div className="flex items-center gap-3">
+          <img src={pendingPhoto.previewUrl} className="h-24 w-24 rounded-md border object-cover" alt="" />
+          <div className="flex min-w-0 flex-col gap-2">
+            <span className="truncate text-sm text-muted-foreground">{pendingPhoto.file.name}</span>
+            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>Choose a different photo</Button>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>Choose a photo</Button>
+    )
+  }
 
   return (
     <Shell
@@ -268,6 +393,11 @@ export default function MenuEditor () {
               onChange={(e) => setForm({ ...form, sortOrder: e.target.value })}
             />
           </div>
+          <div className="space-y-1">
+            <Label>Photo</Label>
+            {renderPhotoField(null)}
+            <input ref={fileInputRef} type="file" accept="image/jpeg,image/png" className="hidden" onChange={handlePhotoChosen} />
+          </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={closeDialogs} disabled={submitting}>Cancel</Button>
             <Button onClick={submitAdd} disabled={submitting}>Add item</Button>
@@ -317,6 +447,11 @@ export default function MenuEditor () {
               value={form.sortOrder}
               onChange={(e) => setForm({ ...form, sortOrder: e.target.value })}
             />
+          </div>
+          <div className="space-y-1">
+            <Label>Photo</Label>
+            {renderPhotoField(editItem)}
+            <input ref={fileInputRef} type="file" accept="image/jpeg,image/png" className="hidden" onChange={handlePhotoChosen} />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={closeDialogs} disabled={submitting}>Cancel</Button>

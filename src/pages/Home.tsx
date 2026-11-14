@@ -89,6 +89,15 @@ export default function Home () {
                   return (
                     <Card key={item.id}>
                       <CardContent className="flex items-center gap-4 p-4">
+                        {item.photoUrl && (
+                          <img
+                            src={item.photoUrl}
+                            alt={item.name}
+                            loading="lazy"
+                            decoding="async"
+                            className="h-14 w-14 shrink-0 rounded-md border object-cover bg-muted"
+                          />
+                        )}
                         <div className="min-w-0 flex-1">
                           <div className="font-medium">{item.name}</div>
                           {item.description && (

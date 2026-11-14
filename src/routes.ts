@@ -22,6 +22,8 @@ export const ROUTES: readonly AppRoute[] = [
   { path: '/basket', page: 'Basket' },
   { path: '/checkout', page: 'Checkout' },
   { path: '/order/*', page: 'OrderConfirmation' },
+  { path: '/sign-in', page: 'CustomerSignIn' },
+  { path: '/my-orders', page: 'MyOrders' },
   { path: '/manage', page: 'ManageHome', admin: true },
   { path: '/manage/orders', page: 'Orders', admin: true },
   { path: '/manage/menu', page: 'MenuEditor', admin: true },

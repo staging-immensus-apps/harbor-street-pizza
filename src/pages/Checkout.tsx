@@ -9,17 +9,22 @@ import { Alert } from '@/components/ui/alert'
 import { go } from '@/api/client'
 import { getStoreInfo } from '@/api/store-info'
 import { quoteCart, placeOrder } from '@/api/checkout'
+import { listMyOrders } from '@/api/customer-orders'
 import { useBasket, clearBasket } from '@/lib/basket'
 import { money, errorText, minutesEstimate } from '@/lib/format'
 import type { StoreInfo, Fulfilment, QuoteResponse } from '@/api/types'
+import type { Me } from '@/api/sign-in'
 
 /**
  * Checkout (CLAUDE.md §10 `/checkout`): pickup or delivery, the details that choice needs, the
- * live-priced total, then place the order. Public — guest checkout only, no accounts (§1). The
- * cart is never trusted on the server (CheckoutApi re-prices from MenuItem every time), so this
- * page re-quotes on every change purely to show the customer the number before they commit.
+ * live-priced total, then place the order. Guest checkout is the default and keeps working exactly
+ * as before (§1: no accounts required). The cart is never trusted on the server (CheckoutApi
+ * re-prices from MenuItem every time), so this page re-quotes on every change purely to show the
+ * customer the number before they commit. When a customer is signed in, the server links the order
+ * to their account automatically (customerUserId stamped from the session); this page's only part
+ * in that is a one-time prefill of name/phone/address from their most recent order, below.
  */
-export default function Checkout () {
+export default function Checkout ({ me }: { me: Me }) {
   const lines = useBasket()
   const navigate = useNavigate()
 
@@ -48,6 +53,33 @@ export default function Checkout () {
       .catch(() => { /* checkout still re-checks server-side; this is advisory */ })
     return () => { cancelled = true }
   }, [])
+
+  // Prefill from the signed-in customer's most recent order, once, on load — never while
+  // signed out (that call throws a 403 auth_required the client redirects to /login, the wrong
+  // place to send a guest). Only fills fields still blank, so it never fights what the person types.
+  //
+  // NO PHONE NUMBER HERE: CustomerOrderApi serves the same publicOrderView() shape
+  // OrderConfirmationApi does (lib/orders.js), which deliberately drops customerPhone — "nothing on
+  // that screen needs it and the link may be forwarded" — so a past order carries no phone for this
+  // page to read back. Reported rather than worked around: giving the phone its own resource call
+  // would be a second, admin-only-ish read path for a field this app's owner view already treats as
+  // sensitive, which is a backend decision outside this pass. Name and delivery address still
+  // prefill; phone stays blank for the customer to type, same as a guest.
+  useEffect(() => {
+    if (!me.authenticated) return
+    let cancelled = false
+    listMyOrders()
+      .then((r) => {
+        if (cancelled) return
+        const last = r?.orders?.[0]
+        if (!last) return
+        setCustomerName((v) => (v === '' ? (last.customerName || me.user.name || '') : v))
+        setDeliveryAddress((v) => (v === '' ? (last.deliveryAddress || '') : v))
+        setDeliveryPostcode((v) => (v === '' ? (last.deliveryPostcode || '') : v))
+      })
+      .catch(() => { /* convenience prefill only — leave the fields blank */ })
+    return () => { cancelled = true }
+  }, [me.authenticated])
 
   const cartLines = useMemo(
     () => lines.map((l) => ({ menuItemId: l.menuItemId, quantity: l.quantity })),

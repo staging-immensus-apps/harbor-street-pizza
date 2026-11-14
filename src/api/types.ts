@@ -17,6 +17,9 @@ export type MenuItem = {
   description: string | null
   priceCents: number
   category: string
+  // null when the item has no photo; otherwise /MenuPhotoApi/<id>?v=<photoUpdatedAt>
+  // (lib/menu.js publicMenuItem) — a URL, never the bytes.
+  photoUrl: string | null
 }
 
 // createdAt/updatedAt are Harper-assigned (@createdTime/@updatedTime on MenuItem, CLAUDE.md §8) and
@@ -26,6 +29,8 @@ export type MenuItem = {
 export type MenuItemAdmin = MenuItem & {
   available: boolean
   sortOrder: number
+  // Whether this item has a photo, and the cache-buster its URL carries — null means no photo.
+  photoUpdatedAt: string | null
   createdAt: string | number | null
   updatedAt: string | number | null
 }
@@ -207,6 +212,9 @@ export type AdminOrder = {
   personalDetailsClearedAt: string | null
   /** The one tap this order's screen offers next — received→preparing→ready→collected — or null. */
   nextStatus: OrderStatus | null
+  // Who placed this order while signed in, or null for a guest order (most of them — guest
+  // checkout is unchanged). Informational only this pass; the queue screen does not change.
+  customerUserId: string | null
   // Harper-assigned (@updatedTime on Order); epoch-millisecond number now that OrderAdminApi stops
   // naming it in its own writes, or still an ISO string on a row touched before that fix.
   updatedAt: string | number | null
@@ -219,3 +227,19 @@ export type OrderAdminListResponse = {
 }
 
 export type OrderAdminOneResponse = { order: AdminOrder }
+
+// ---- CustomerOrderApi (lib/orders.js publicOrderView, scoped to the signed-in caller) -------
+
+/** The same shape OrderConfirmationApi serves for a held code — a signed-in customer's own order. */
+export type CustomerOrderRow = OrderConfirmationView
+
+export type CustomerOrderListResponse = { orders: CustomerOrderRow[]; limit: number; truncated: boolean }
+
+// ---- MenuPhotoAdminApi (lib/photos.js) -------------------------------------------------------
+
+export type MenuPhotoWrite = { dataBase64: string; contentType: 'image/jpeg' | 'image/png' }
+
+export type MenuPhotoUploadResponse = {
+  ok: true
+  photo: { menuItemId: string; contentType: string; byteSize: number; uploadedAt: string; photoUpdatedAt: string }
+}
