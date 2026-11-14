@@ -34,6 +34,9 @@ type LoopRun @table {
 
 # One item on the shop's menu. Prices are whole cents, never floats.
 # createdAt and updatedAt are Harper's: never written by resources/MenuAdminApi.js (see the header).
+# photoUpdatedAt is the app's own plain string: null means this item has no photo, and a non-null
+# value is the cache-buster the public menu appends to the photo URL. Not indexed: nothing filters
+# or sorts by it — the menu reads it off rows it already has.
 type MenuItem @table {
   id: ID @primaryKey
   name: String @indexed
@@ -42,14 +45,30 @@ type MenuItem @table {
   category: String @indexed
   available: Boolean @indexed
   sortOrder: Int @indexed
+  photoUpdatedAt: String
   createdAt: Long @createdTime
   updatedAt: Long @updatedTime
+}
+
+# One menu item's photo, id = the MenuItem id, so an item has at most one photo and replacing it is
+# a put on the same key. A separate table on purpose: the bytes never ride along on a menu listing.
+# No managed timestamp here — uploadedAt is a plain string the app writes, so a replace that
+# restates the row cannot hit the 400 described in CLAUDE.md §8.
+type MenuItemPhoto @table {
+  id: ID @primaryKey
+  contentType: String
+  byteSize: Int
+  data: Blob
+  uploadedAt: String
 }
 
 # One customer order. audit: true because the owner's order screen subscribes to this table for new
 # orders arriving without a reload (Harper refuses subscribe on a table with no audit store).
 # Line items are a snapshot of name and price at the time of ordering, so a later price change never
 # rewrites an old order.
+# customerUserId is the User row of the signed-in customer who placed it, and null for a guest order.
+# Indexed: the customer's own order list is that equality plus a sort on placedAt. It is set from the
+# session at checkout and never from the request body, and account deletion clears it back to null.
 # updatedAt is Harper's: a write that restates a stored row must drop it before putting it back.
 type Order @table(audit: true) {
   id: ID @primaryKey
@@ -58,6 +77,7 @@ type Order @table(audit: true) {
   status: String @indexed
   queue: String @indexed
   fulfilment: String @indexed
+  customerUserId: String @indexed
   customerName: String
   customerPhone: String
   deliveryAddress: String
