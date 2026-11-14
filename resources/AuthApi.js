@@ -6,7 +6,8 @@
 //   GET  /AuthApi/logout             clear the cookie (also POST)
 //   POST /AuthApi/request-link       { email } → { ok: true }, sending a link when it may; 503 email_not_configured when this app has no mail key
 //   POST /AuthApi/google             { credential } → session cookie + { ok, user }
-//   POST /AuthApi/password           { email, password } → admin-only password sign-in, 10 misses / 15 min per email
+//   POST /AuthApi/password           { email, password } → password sign-in, 10 misses / 15 min per email
+//   POST /AuthApi/register           { email, password, name? } → a CUSTOMER account + session cookie
 //   POST /AuthApi/logout
 //
 // Rules this file embodies (CLAUDE.md §4): loadAsInstance = false and checkPermission =
@@ -18,6 +19,33 @@
 // anything else is checked (lib/auth.js redeemMagicLink); and when the app names its owner (`OWNER_EMAIL`),
 // the owner's first sign-in by link, invite or Google while the app has no administrator makes them it
 // (lib/auth.js `ownerTakesSeat`), and nobody else's sign-in does.
+//
+// ── THIS APP'S CHANGE TO THE KIT: CUSTOMERS HAVE ACCOUNTS, AND THE OWNER'S SEAT DOES NOT MOVE ──────
+//
+// The shop's customers may now create an account with an email and a password and see their past
+// orders, which the kit as shipped does not do: it reserves password sign-in for an administrator
+// and makes every member by invitation. Extending THIS resource is the only right place for it —
+// a second sign-in beside the reviewed one would be two session cookies and two places a mistake
+// lets the wrong person in — so two things changed here and nothing else did.
+//
+//   1. `register` below creates a MEMBER with a password, regardless of `AUTH_OPEN_SIGNUP`. That
+//      variable governs who may become a member of the APP by invitation (`accessModel.signUp:
+//      "invited"`, which is about the shop's staff, of whom there are none besides the owner);
+//      a customer account carries no access to anything but that customer's own orders.
+//   2. `password` below admits any active row that HAS a hash, not only an admin. A member gets a
+//      hash by registering, and by nothing else.
+//
+// WHY THAT DOES NOT MOVE THE OWNER'S SEAT, which is the one thing this app may not loosen
+// (CLAUDE.md §9). Promotion to administrator happens only in `verify` and `google`, only through
+// `ownerTakesSeat`, and only on a PROOF of the owner's address — a redeemed link or a Google
+// identity. A password is never such a proof. And `register` refuses the owner's address outright,
+// so the row that can be promoted can never carry a password a stranger chose: without that
+// refusal, somebody could register the owner's address, wait for the real owner's first magic link
+// to promote that very row, and then sign in to it as an administrator with the password they set.
+
+// Long enough to be worth hashing, short enough that nobody is locked out of ordering a pizza.
+const PASSWORD_MIN = 8
+const PASSWORD_MAX = 200
 
 import { Resource } from 'harperdb'
 import { db } from '../lib/db.js'
@@ -26,7 +54,7 @@ import {
   normalizeEmail, findUserByEmail, findUserByGoogleSub, findUserById, claimUserForEmail, sanitizeUser,
   verifyGoogleIdToken, checkPasswordAttempt, burnPasswordVerify, createSessionToken, buildSessionCookie, buildLogoutCookie,
   getSessionUser, sessionMatchesRow, issueMagicLink, redeemMagicLink, magicLinkUrl,
-  ownerMayJoin, ownerTakesSeat,
+  ownerMayJoin, ownerTakesSeat, ownerSetting, hashPassword,
 } from '../lib/auth.js'
 import { json, pathFrom, queryParams } from '../lib/http.js'
 import { clientIp, previewPath, redirect, runAuthed } from '../lib/sign-in-support.js'
@@ -76,6 +104,7 @@ export class AuthApi extends Resource {
       if (path === 'request-link') return this.requestLink(body)
       if (path === 'google') return this.google(body)
       if (path === 'password') return this.password(body)
+      if (path === 'register') return this.register(body)
       if (path === 'logout') return this.logout()
       return json({ error: 'not found' }, 404)
     })
@@ -144,13 +173,13 @@ export class AuthApi extends Resource {
       // Over the accounts quota the answer is still { ok } — anything else would say which
       // addresses are new — but no row is made and no link is sent.
       if (claim.refused) {
-        console.log('[auth] sign-up by link refused: the accounts quota is reached')
+        globalThis.logger?.warn('[auth] sign-up by link refused: the accounts quota is reached')
         return json({ ok: true })
       }
       user = claim.user
     }
     if (!user || user.deactivatedAt) {
-      console.log(`[auth] magic link requested for ${user ? 'a deactivated' : 'an unknown'} address`)
+      globalThis.logger?.warn(`[auth] magic link requested for ${user ? 'a deactivated' : 'an unknown'} address`)
       return json({ ok: true })
     }
     const { token, rateLimited } = await issueMagicLink(user)
@@ -195,7 +224,7 @@ export class AuthApi extends Resource {
     const promote = await ownerTakesSeat(user, link.email)
     const updated = { ...user, ...(promote ? { role: ROLE_ADMIN } : {}), lastLoginAt: now, updatedAt: now }
     await db.User.put(updated)
-    if (promote) console.log(`[auth] the app owner signed in, and user ${user.id} is now this app's administrator`)
+    if (promote) globalThis.logger?.warn(`[auth] the app owner signed in, and user ${user.id} is now this app's administrator`)
     // EVERY `Location` THIS ROUTE ISSUES IS PREFIXED IN THE PREVIEW COPY.
     // The cookie minted just above is stamped `stage` and is REFUSED by the published copy, so an
     // unprefixed redirect lands the person signed out on the live app — which is the flow
@@ -233,7 +262,7 @@ export class AuthApi extends Resource {
     // owner's promotion is the one role this route ever writes.
     const updated = { ...user, ...(promote ? { role: ROLE_ADMIN } : {}), googleSub: user.googleSub ?? google.sub, name: user.name ?? google.name ?? null, lastLoginAt: now, updatedAt: now }
     await db.User.put(updated)
-    if (promote) console.log(`[auth] the app owner signed in with Google, and user ${user.id} is now this app's administrator`)
+    if (promote) globalThis.logger?.warn(`[auth] the app owner signed in with Google, and user ${user.id} is now this app's administrator`)
     return json({ ok: true, user: sanitizeUser(updated) }, 200, { cookies: [buildSessionCookie(createSessionToken(updated))] })
   }
 
@@ -249,13 +278,66 @@ export class AuthApi extends Resource {
     // An unknown email spends the same PBKDF2 a wrong password does, so the two
     // misses are the same size on the clock as well as on the wire.
     const attempt = row ? await checkPasswordAttempt(row, password, { ip: clientIp(this) }) : { ok: burnPasswordVerify(password), rateLimited: false }
-    const ok = attempt.ok && !row.deactivatedAt && row.role === ROLE_ADMIN
+    // ANY ACTIVE ROW WITH A HASH, which in this app is the owner and every customer who registered
+    // (the header says why that is not a loosening of who may administer the shop). A row with no
+    // hash — every member made by invitation or by a magic link — cannot pass, because
+    // checkPasswordAttempt spends its PBKDF2 on the decoy for those and answers false.
+    const ok = attempt.ok && !row.deactivatedAt
     if (!ok) return json({ error: 'invalid email or password' }, 403)
     const now = new Date().toISOString()
     // A success closes the window: the misses before it were the owner's typos, not a probe.
     const updated = { ...row, passwordAttemptTimestamps: [], lastLoginAt: now, updatedAt: now }
     await db.User.put(updated)
     return json({ ok: true, user: sanitizeUser(updated) }, 200, { cookies: [buildSessionCookie(createSessionToken(updated))] })
+  }
+
+  /**
+   * Create a customer account and sign it in. `{ email, password, name? }` → 201 with a session
+   * cookie, or a refusal the sign-in page shows as it is.
+   *
+   * IT SAYS WHEN AN ADDRESS IS ALREADY REGISTERED, and that is a considered trade rather than an
+   * oversight: `request-link` must never reveal whether an address has an account, because anyone
+   * may ask it about anyone. This route is a person creating their own account, where "there is
+   * already an account for that address, sign in instead" is the difference between signing in and
+   * giving up — and the same fact is readable from any sign-up form that refuses duplicates. It
+   * leaks no credential and grants nothing; the generic refusal stays where it matters, on
+   * `password` and on `request-link`.
+   *
+   * The role is always `member`, written here and never read from the body, so a caller cannot ask
+   * for `admin`. The accounts quota is `claimUserForEmail`'s to enforce, and its refusal is served
+   * as it comes back so the page can say the shop is not taking new accounts.
+   */
+  async register (data) {
+    const email = normalizeEmail(data?.email)
+    const password = String(data?.password ?? '')
+    const name = String(data?.name ?? '').trim()
+    if (!email) return json({ error: 'that is not an email address', code: 'bad_email' }, 400)
+    if (password.length < PASSWORD_MIN) return json({ error: `a password must be at least ${PASSWORD_MIN} characters`, code: 'password_too_short' }, 400)
+    if (password.length > PASSWORD_MAX) return json({ error: 'that password is too long', code: 'password_too_long' }, 400)
+    if (name.length > 120) return json({ error: 'name must be at most 120 characters', code: 'bad_name' }, 400)
+
+    // The shop's own address is not a customer account, and the header says what it would cost to
+    // let one be made: the row that the owner's first magic link promotes must never already carry
+    // a password somebody else chose.
+    const owner = ownerSetting().email
+    if (owner && email === owner) {
+      return json({ error: 'That address belongs to the shop. Sign in with the link we email you instead.', code: 'owner_address' }, 403)
+    }
+
+    const existing = await findUserByEmail(email)
+    if (existing) return json({ error: 'There is already an account for that address. Sign in instead.', code: 'already_registered' }, 409)
+
+    const claim = await claimUserForEmail({ email, name: name || null, role: ROLE_MEMBER })
+    if (claim.refused) return claim.refused
+    // Two registrations of one address that interleave land on one key (the id is derived from the
+    // address), and the loser is told the account exists rather than being handed the winner's row
+    // with its own password written over it.
+    if (!claim.created) return json({ error: 'There is already an account for that address. Sign in instead.', code: 'already_registered' }, 409)
+
+    const now = new Date().toISOString()
+    const row = { ...claim.user, passwordHash: hashPassword(password), lastLoginAt: now, updatedAt: now }
+    await db.User.put(row)
+    return json({ ok: true, user: sanitizeUser(row) }, 201, { cookies: [buildSessionCookie(createSessionToken(row))] })
   }
 }
 

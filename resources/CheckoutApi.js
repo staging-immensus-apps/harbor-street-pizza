@@ -8,8 +8,15 @@
 // is the one place that turns it into one — both endpoints here call exactly that function, so the
 // number quoted and the number charged cannot disagree. Every Order row is built field by field from
 // the quote, the validated customer and the clock; the request body is NEVER spread into it, so a
-// caller cannot smuggle status, queue, paymentStatus, paymentRef, code, id or a total of their own
-// choosing into a row.
+// caller cannot smuggle status, queue, paymentStatus, paymentRef, code, id, customerUserId or a
+// total of their own choosing into a row.
+//
+// CUSTOMERUSERID COMES FROM THE SESSION, NEVER THE BODY. When the request carries a valid session
+// (lib/context.js's optionalCaller — the same checks loadCaller applies, answering null instead of
+// throwing) the order is stamped with that caller's id, so it reaches their own past-orders page
+// (CustomerOrderApi). Guest checkout is unchanged and unrequired: nothing here refuses an anonymous
+// caller, and a cookie that fails any of optionalCaller's checks (deactivated, reassigned) is simply
+// nobody, so the order is placed as a guest.
 //
 // TWO PAYMENT PATHS, both load-bearing (CLAUDE.md §1): with no Stripe key the order is placed
 // immediately, pay_at_store; with one, the order is written FIRST as pending_payment so it exists
@@ -24,6 +31,7 @@ import { db } from '../lib/db.js'
 import { json, segmentsOf, runAuthed } from '../lib/http.js'
 import { priceCart, normalizeFulfilment } from '../lib/pricing.js'
 import { loadStoreSettings } from '../lib/shop.js'
+import { optionalCaller } from '../lib/context.js'
 import {
   newOrderCode, orderUrl, checkoutUrl, readyEstimateAt, validateCustomer,
   QUEUE_ACTIVE, QUEUE_PENDING, STATUS_RECEIVED, STATUS_AWAITING_PAYMENT,
@@ -45,7 +53,7 @@ export class CheckoutApi extends Resource {
       const [sub] = segmentsOf(target)
       const body = data && typeof data === 'object' ? data : {}
       if (sub === 'quote') return this.quote(body)
-      if (sub === 'order') return this.order(body)
+      if (sub === 'order') return this.order(body, await optionalCaller(this))
       return json({ error: 'not found' }, 404)
     })
   }
@@ -84,7 +92,7 @@ export class CheckoutApi extends Resource {
    * paused, an unpriceable cart, the chosen fulfilment switched off, an uncovered delivery
    * postcode, invalid customer details. Only then is a row written.
    */
-  async order (body) {
+  async order (body, caller) {
     const settings = await loadStoreSettings()
     if (!settings.acceptingOrders) return json({ error: 'we are not taking orders right now', code: 'ordering_paused' }, 400)
 
@@ -116,6 +124,7 @@ export class CheckoutApi extends Resource {
       deliveryFeeCents: priced.deliveryFeeCents,
       totalCents: priced.totalCents,
       personalDetailsClearedAt: null,
+      customerUserId: caller?.userId ?? null,
     }
 
     if (!stripeConfigured()) {

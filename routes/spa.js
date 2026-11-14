@@ -23,6 +23,8 @@ export const SPA_ROUTES = [
   '/basket',
   '/checkout',
   '/order/*',
+  '/sign-in',
+  '/my-orders',
   '/manage',
   '/manage/orders',
   '/manage/menu',

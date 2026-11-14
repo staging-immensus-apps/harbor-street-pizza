@@ -11,6 +11,10 @@
 // GET /MenuApi with no cookie and no query and the build stops unless it answers 200, so an empty
 // table is `{ categories: [], items: [], acceptingOrders, storeName }` with status 200, never 404
 // and never thrown.
+//
+// Each item carries a photo URL and NEVER photo bytes: `publicMenuItem` (lib/menu.js) composes
+// `photoUrl` from the row's id and `photoUpdatedAt`, null when the item has none. A listing with
+// images inlined would be megabytes on a phone; the bytes live behind `MenuPhotoApi` instead.
 
 import { Resource } from 'harperdb'
 import { db } from '../lib/db.js'

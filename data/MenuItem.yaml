@@ -12,6 +12,10 @@ records:
     category: Pizzas
     available: true
     sortOrder: 10
+    # The photo bytes are NOT here: a Blob seeded from YAML text would store the text. This stamp is
+    # what the public menu turns into a photo URL, and scripts/seed.js writes the matching
+    # MenuItemPhoto row (a generated PNG) under this same id.
+    photoUpdatedAt: '2026-11-14T09:00:00.000Z'
   - id: menu-pepperoni
     name: Pepperoni
     description: Tomato, mozzarella, a generous layer of pepperoni.
@@ -19,6 +23,7 @@ records:
     category: Pizzas
     available: true
     sortOrder: 20
+    photoUpdatedAt: '2026-11-14T09:00:00.000Z'
   - id: menu-funghi
     name: Funghi
     description: Chestnut mushrooms, garlic, mozzarella, thyme.

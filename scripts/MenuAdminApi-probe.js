@@ -272,6 +272,71 @@ section('delete removes the row; a second delete is 404; Order rows are untouche
   check('the Order row referencing the deleted item is byte-for-byte unchanged', JSON.stringify(orderAfter) === JSON.stringify(orderBefore))
 }
 
+section('deleting an item also deletes its photo (MenuItemPhoto, keyed by the same id)')
+{
+  const created = await call(MenuAdminApi, 'POST', '', { cookie: ADMIN.cookie, body: { name: 'Photo Pizza', priceCents: 700 } })
+  check('setup create -> 201', created.status === 201)
+  const id = created.json.item.id
+  await tables.MenuItemPhoto.put({ id, contentType: 'image/jpeg', byteSize: 100, data: null, uploadedAt: '2026-01-01T00:00:00.000Z' })
+  check('PRECONDITION: the photo row exists before the delete', tables.MenuItemPhoto.rows.has(id))
+
+  const del = await call(MenuAdminApi, 'POST', 'delete', { cookie: ADMIN.cookie, body: { id } })
+  check('delete -> 200 and reports the photo was deleted', del.status === 200 && del.json?.ok === true && del.json?.photoDeleted === true)
+  check('the MenuItem row is gone', !tables.MenuItem.rows.has(id))
+  check('…and so is its MenuItemPhoto row', !tables.MenuItemPhoto.rows.has(id))
+}
+
+section('deleting an item with NO photo still succeeds, and never throws (NEG for the unconditional delete)')
+{
+  const created = await call(MenuAdminApi, 'POST', '', { cookie: ADMIN.cookie, body: { name: 'No Photo Here', priceCents: 600 } })
+  check('setup create -> 201', created.status === 201)
+  const id = created.json.item.id
+  check('PRECONDITION: no photo row exists for it', !tables.MenuItemPhoto.rows.has(id))
+
+  const del = await call(MenuAdminApi, 'POST', 'delete', { cookie: ADMIN.cookie, body: { id } })
+  check('delete of an item with no photo -> 200, ok: true, no throw', del.status === 200 && del.json?.ok === true)
+  check('the item is gone', !tables.MenuItem.rows.has(id))
+}
+
+section('a photo belonging to a DIFFERENT item is untouched by the delete (NEG — the delete is keyed, not a sweep)')
+{
+  const itemA = await call(MenuAdminApi, 'POST', '', { cookie: ADMIN.cookie, body: { name: 'Item A', priceCents: 500 } })
+  const itemB = await call(MenuAdminApi, 'POST', '', { cookie: ADMIN.cookie, body: { name: 'Item B', priceCents: 500 } })
+  const idA = itemA.json.item.id
+  const idB = itemB.json.item.id
+  await tables.MenuItemPhoto.put({ id: idA, contentType: 'image/png', byteSize: 50, data: null, uploadedAt: '2026-01-01T00:00:00.000Z' })
+  await tables.MenuItemPhoto.put({ id: idB, contentType: 'image/png', byteSize: 50, data: null, uploadedAt: '2026-01-01T00:00:00.000Z' })
+
+  const del = await call(MenuAdminApi, 'POST', 'delete', { cookie: ADMIN.cookie, body: { id: idA } })
+  check('deleting item A -> 200', del.status === 200 && del.json?.ok === true)
+  check("item A's photo is gone", !tables.MenuItemPhoto.rows.has(idA))
+  check("item B's photo is untouched (NEG)", tables.MenuItemPhoto.rows.has(idB))
+  check("item B itself is untouched", tables.MenuItem.rows.has(idB))
+}
+
+section('an update that changes a field leaves the stored photoUpdatedAt exactly as it was (NEG: a body naming photoUpdatedAt changes nothing)')
+{
+  const created = await call(MenuAdminApi, 'POST', '', { cookie: ADMIN.cookie, body: { name: 'Pepperoni', priceCents: 1000 } })
+  const id = created.json.item.id
+  await tables.MenuItem.put({ ...tables.MenuItem.rows.get(id), photoUpdatedAt: '2026-02-01T00:00:00.000Z' })
+
+  const updated = await call(MenuAdminApi, 'POST', 'update', { cookie: ADMIN.cookie, body: { id, priceCents: 1100, photoUpdatedAt: '1999-01-01T00:00:00.000Z' } })
+  check('update -> 200 and the price changed', updated.status === 200 && updated.json?.item?.priceCents === 1100)
+  check('…but photoUpdatedAt is untouched by the body (NEG)', updated.json?.item?.photoUpdatedAt === '2026-02-01T00:00:00.000Z')
+  check('…and the stored row agrees', tables.MenuItem.rows.get(id).photoUpdatedAt === '2026-02-01T00:00:00.000Z')
+  check('…and the captured write names no managed field', managedFieldsIn(writes[writes.length - 1], 'MenuItem').length === 0)
+}
+
+section('the admin list/read responses carry photoUpdatedAt and photoUrl')
+{
+  const r = await call(MenuAdminApi, 'GET', '', { cookie: ADMIN.cookie })
+  check('the list is non-empty', r.status === 200 && (r.json?.items ?? []).length > 0)
+  check('every item in the list carries the photoUpdatedAt key', (r.json?.items ?? []).every((i) => 'photoUpdatedAt' in i))
+  check('every item in the list carries the photoUrl key', (r.json?.items ?? []).every((i) => 'photoUrl' in i))
+  const one = await call(MenuAdminApi, 'GET', 'seed-hidden', { cookie: ADMIN.cookie })
+  check('a single item carries both keys too', one.status === 200 && 'photoUpdatedAt' in one.json.item && 'photoUrl' in one.json.item)
+}
+
 section('negative control: the managed-field verdict can say no')
 {
   const synthetic = { id: 'x', name: 'Y', priceCents: 100, createdAt: 123, updatedAt: 456 }

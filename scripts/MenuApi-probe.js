@@ -38,10 +38,11 @@ section('an empty table answers 200 with empty lists (the smoke row)')
 }
 
 section('seed items — available and unavailable, mixed categories and sort orders')
-await tables.MenuItem.put({ id: 'm1', name: 'Margherita', description: 'Tomato, mozzarella', priceCents: 900, category: 'Pizza', available: true, sortOrder: 2 })
+await tables.MenuItem.put({ id: 'm1', name: 'Margherita', description: 'Tomato, mozzarella', priceCents: 900, category: 'Pizza', available: true, sortOrder: 2, photoUpdatedAt: '2026-01-02T00:00:00.000Z' })
 await tables.MenuItem.put({ id: 'm2', name: 'Pepperoni', description: 'Tomato, mozzarella, pepperoni', priceCents: 1100, category: 'Pizza', available: true, sortOrder: 1 })
 await tables.MenuItem.put({ id: 'm3', name: 'Garlic Bread', description: null, priceCents: 400, category: 'Sides', available: true, sortOrder: 1 })
-await tables.MenuItem.put({ id: 'm4', name: 'Secret Test Pizza', description: 'hidden', priceCents: 50000, category: 'Pizza', available: false, sortOrder: 0 })
+await tables.MenuItem.put({ id: 'm4', name: 'Secret Test Pizza', description: 'hidden', priceCents: 50000, category: 'Pizza', available: false, sortOrder: 0, photoUpdatedAt: '2026-01-03T00:00:00.000Z' })
+await tables.MenuItem.put({ id: 'm5 a/b', name: 'Calzone', description: null, priceCents: 1200, category: 'Pizza', available: true, sortOrder: 3, photoUpdatedAt: '2026-01-04T00:00:00.000Z' })
 
 section('the stub would surface the leak (the fixture can fail)')
 {
@@ -51,22 +52,44 @@ section('the stub would surface the leak (the fixture can fail)')
 }
 
 section('anonymous reads the public menu, filtered, sorted and grouped')
+let menuBody
 {
   const r = await call(MenuApi, 'GET', '')
   check('anonymous caller → 200 (this resource is public, not a 403)', r.status === 200)
   const ids = (r.json?.items ?? []).map((i) => i.id)
   check('the unavailable item never appears (NEG)', !ids.includes('m4'))
-  check('every available item does appear', ids.includes('m1') && ids.includes('m2') && ids.includes('m3'))
+  check('every available item does appear', ids.includes('m1') && ids.includes('m2') && ids.includes('m3') && ids.includes('m5 a/b'))
   check('an item never carries `available`', (r.json?.items ?? []).every((i) => !('available' in i)))
 
   const pizza = (r.json?.categories ?? []).find((c) => c.category === 'Pizza')
   const sides = (r.json?.categories ?? []).find((c) => c.category === 'Sides')
   check('categories are grouped', Boolean(pizza) && Boolean(sides))
-  check('Pizza group holds exactly the two available pizzas, sorted by sortOrder', pizza?.items?.map((i) => i.id).join(',') === 'm2,m1')
+  check('Pizza group holds exactly the available pizzas, sorted by sortOrder', pizza?.items?.map((i) => i.id).join(',') === 'm2,m1,m5 a/b')
   check('Sides group holds the one available side', sides?.items?.map((i) => i.id).join(',') === 'm3')
   check('categories sorted alphabetically (Pizza before Sides)', (r.json?.categories ?? []).map((c) => c.category).join(',') === 'Pizza,Sides')
 
   check('shop-level fields ride along', typeof r.json?.acceptingOrders === 'boolean' && typeof r.json?.storeName === 'string')
+  menuBody = r
+}
+
+section('a photo rides along as a URL, never as bytes')
+{
+  const items = menuBody.json?.items ?? []
+  const m1 = items.find((i) => i.id === 'm1')
+  const m2 = items.find((i) => i.id === 'm2')
+  const m5 = items.find((i) => i.id === 'm5 a/b')
+  check('an item with photoUpdatedAt carries a photoUrl naming its own id and the stamp', typeof m1?.photoUrl === 'string' && m1.photoUrl.includes('/MenuPhotoApi/m1') && m1.photoUrl.includes(`v=${encodeURIComponent('2026-01-02T00:00:00.000Z')}`))
+  check('an item with no photoUpdatedAt carries photoUrl === null, not absent and not empty (NEG)', 'photoUrl' in (m2 ?? {}) && m2.photoUrl === null)
+  check('an id needing URL-escaping round-trips through photoUrl', typeof m5?.photoUrl === 'string' && m5.photoUrl.includes(`/MenuPhotoApi/${encodeURIComponent('m5 a/b')}`) && m5.photoUrl.includes(`v=${encodeURIComponent('2026-01-04T00:00:00.000Z')}`))
+
+  const pizza = (menuBody.json?.categories ?? []).find((c) => c.category === 'Pizza')
+  const grouped1 = pizza?.items?.find((i) => i.id === 'm1')
+  check('the same photoUrl appears inside categories, not only in the flat list', grouped1?.photoUrl === m1?.photoUrl)
+
+  const serialized = JSON.stringify(menuBody.json)
+  check('the response carries no photo bytes anywhere (NEG)', !('data' in (m1 ?? {})) && !/"data"\s*:/.test(serialized) && !/photoUpdatedAt/.test(serialized))
+
+  check('the unavailable item, even with a photo, never appears (NEG)', !items.some((i) => i.id === 'm4'))
 }
 
 section('a sub-path is 404, and no method but GET is served')
