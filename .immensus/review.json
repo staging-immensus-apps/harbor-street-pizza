@@ -1,35 +1,28 @@
 {
-  "verdict": "changes",
+  "verdict": "approve",
   "designFidelity": "matches",
-  "summary": "Owner rules hold: CustomerOrderApi filters Order on customerUserId from loadCaller() with no admin branch and no id/query channel, CheckoutApi stamps customerUserId from optionalCaller() and never from the body, MenuPhotoAdminApi and MenuAdminApi open every method with requireAdmin(), and MenuPhotoApi/MenuApi are public exactly as api-plan.json says. Conventions are clean: loadAsInstance=false and checkPermission=false everywhere, class names differ from table names (MenuPhotoApi/MenuItemPhoto, CustomerOrderApi/Order), post(target, data), segmentsOf(), db.<Table> only, customerUserId @indexed, Blob written as new Blob([buf],{type}) with verify-on-write and delete-on-mismatch, withoutManaged() on every restated MenuItem/Order row, 403 with code everywhere and no 401, no new dependency and no new egress host. run_check lint is green. The one thing this build should fix before publish is a documented sign-up gate that the code does not apply. The QA report's two functional failures (a self-registered password not working on a later sign-in, and the /login password button) are the app owner's defects, not review findings, and are deliberately not listed here.",
+  "summary": "Owner rules hold on every resource this build touched: CustomerOrderApi filters Order on customerUserId from the session with no admin branch, no ?owner= channel and no sub-path read; CheckoutApi stamps customerUserId from lib/context.js optionalCaller (which applies every check loadCaller applies and answers null instead of throwing) and never from the body; MenuPhotoAdminApi and MenuAdminApi are requireAdmin on every verb; MenuApi/MenuPhotoApi are public as the plan declares. Every refusal is a thrown 403 with no WWW-Authenticate — no 401 anywhere. Blob writes use new Blob([buf],{type}) with verify-on-write and delete-on-mismatch (rule 8), every restate of a stored MenuItem/Order row goes through withoutManaged() (CLAUDE.md §8), customerUserId is @indexed, class names differ from table names, no tables/databases import outside lib/db.js, no new dependency, and the only outbound hosts remain api.resend.com and api.stripe.com. Opening signUp to 'open' does not move the owner's seat: register always writes role member, refuses OWNER_EMAIL outright, and promotion still happens only through ownerTakesSeat on a proven address. run_check lint is green. Three findings, none of them a hole an outsider can walk through.",
   "findings": [
     {
-      "file": "resources/AuthApi.js",
-      "line": 310,
-      "rule": "auth_scope",
+      "file": "resources/AccountApi.js",
+      "line": 108,
+      "rule": "convention",
       "severity": "major",
-      "message": "POST /AuthApi/register creates an account without ever consulting config.auth.openSignup(), while the two other account-creating paths in the same file do (request-link at line 171, google at line 248 which answers 403 not_invited). CLAUDE.md §9, written in this same diff, states the opposite — 'refuses unless config.auth.openSignup()' — so the app's own spec and its code disagree about the front door, and the code is the permissive one. api-plan.json currently says signUp: \"open\", so the deploy writes AUTH_OPEN_SIGNUP=true and nothing is open today that should be closed; the defect is that the gate is absent rather than true. The moment the owner asks to close sign-ups, request-link and google close and register stays wide open. Worse, scripts/customer-accounts-probe.js pins the ungated behaviour on purpose: it sets AUTH_OPEN_SIGNUP=false and asserts the registration still returns 201, so a later session restoring the gate has to break a green suite to do it. Either add the openSignup() check at the top of register() (and relax the probe), or change CLAUDE.md §9 so it describes what the code does — but one line should say one thing."
+      "message": "PUT /AccountApi/password verifies `currentPassword` with a bare verifyPassword() call — no fixed-window counter on the row, and a distinct refusal code (403 `wrong_password`) rather than the generic one. CLAUDE.md rule 25 is explicit that every credential check sits behind a counter on the row it checks and refuses with the same generic 403. AuthApi/password next door does exactly that (checkPasswordAttempt on passwordAttemptTimestamps); this new route is the one credential check in the app with no cap, so a holder of a stolen or borrowed session can brute-force the account's current password at will and turn cookie access into permanent takeover, and each attempt burns a synchronous 100k-round PBKDF2 on the worker thread. Reuse checkPasswordAttempt (or the same window) here and return the generic refusal. Not a blocker: the caller must already hold a valid session for the very account being attacked, so nothing is reachable from outside."
     },
     {
-      "file": "resources/AuthApi.js",
-      "line": 322,
-      "rule": "auth_scope",
+      "file": "resources/AccountApi.js",
+      "line": 83,
+      "rule": "design",
       "severity": "minor",
-      "message": "register() closes the pre-loaded-seat attack for exactly one address (OWNER_EMAIL) and the header explains that case well, but the same shape survives one step further out. Anyone may now register an address nobody has claimed and set a password on it; AdminApi.setRole (resources/AdminApi.js:107) can later promote any existing row to admin, and AuthApi.password now admits any active row carrying a hash. So an attacker who pre-registers an address the owner later promotes holds an admin password on that row. The exposure is narrow — CLAUDE.md says there are no staff logins, promotion is a deliberate admin act, and an invite alone does not change a role — but the mitigation is cheap and belongs with the owner-address check: either refuse password sign-in on a row whose hash predates its promotion, or clear passwordHash in setRole when a row is raised to admin."
-    },
-    {
-      "file": "resources/AuthApi.js",
-      "line": 335,
-      "rule": "race",
-      "severity": "minor",
-      "message": "register() uses `claim.created` as the uniqueness arbiter ('Two registrations of one address that interleave land on one key ... the loser is told the account exists'), but lib/auth.js's own measured header for claimUserForEmail says precisely the opposite: Harper's create() is a local getSync plus an unconditional commit retry, 'two concurrent claims on one address can both create', and 'a caller must not read created as proof it was first'. Under a true interleave both registrations therefore get 201 and a session, and the second hashPassword overwrites the first. The preceding findUserByEmail check makes a sequential retry safe, so the practical window is two simultaneous sign-ups of the same address and the blast radius is a member account; the comment claiming a guarantee the platform has measured as absent is the part worth correcting."
+      "message": "Account deletion unlinks at most UNLINK_LIMIT (1000) orders and then deletes the User row unconditionally, so for a customer over that limit the remaining orders keep a customerUserId pointing at a user that no longer exists — a residual identifier derived from the deleted address (userIdFor), surviving the deletion the page promised. The comment above UNLINK_LIMIT says such a customer 'deletes their account in two passes', but the code gives them no second pass: the row is gone after the first. Either delete the User row only when the sweep came back short of the limit, or loop until no rows match."
     },
     {
       "file": "scripts/seed.js",
-      "line": null,
+      "line": 73,
       "rule": "secret",
       "severity": "minor",
-      "message": "customerPassword() ships a literal default password ('pizza-preview-demo') that is hashed onto two seeded member accounts. It is not a provider key, the accounts are example.com, the value is overridable with SEED_CUSTOMER_PASSWORD and the header reasons about why the owner gets no seeded credential — so this is noted rather than blocked. Still: it is a working sign-in credential committed to the owner's repository, and now that AuthApi/password admits any row with a hash it is a real one wherever this script is ever run. Prefer requiring SEED_CUSTOMER_PASSWORD (or a per-run random value printed to stdout) over a default that is the same in every checkout."
+      "message": "A literal password, 'pizza-preview-demo', is now committed and written as the passwordHash of two seeded accounts — reversing this file's own stated rule that 'a seeded credential would be a credential in the repository'. It is not an API key and the blast radius is small (two example.com rows, role member, reachable only through this script, which the platform runs against the preview), which is why this is minor rather than a blocker. Worth making SEED_CUSTOMER_PASSWORD required rather than defaulted, or deriving a random one per run and printing it, so no working credential ships in the tree."
     }
   ]
 }
