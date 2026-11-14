@@ -2,7 +2,7 @@
   "/": ["browse-menu", "public-menu-shows-photo"],
   "/basket": [],
   "/checkout": ["choose-pickup-or-delivery", "pay-online", "customer-order-linked-to-account"],
-  "/order/:code": ["order-confirmation"],
+  "/order/*": ["order-confirmation"],
   "/sign-in": ["customer-create-account"],
   "/my-orders": ["customer-view-past-orders"],
   "/manage": [],
