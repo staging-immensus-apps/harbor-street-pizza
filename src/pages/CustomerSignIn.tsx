@@ -39,7 +39,9 @@ export default function CustomerSignIn({ me }: { me: Me }) {
   const [forgotEmail, setForgotEmail] = useState('')
   const [sent, setSent] = useState(false)
 
-  const [busy, setBusy] = useState(false)
+  const [busyCreate, setBusyCreate] = useState(false)
+  const [busySignIn, setBusySignIn] = useState(false)
+  const [busyLink, setBusyLink] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -50,9 +52,18 @@ export default function CustomerSignIn({ me }: { me: Me }) {
     return () => { alive = false }
   }, [])
 
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault()
-    setBusy(true)
+  async function handleCreate(e?: FormEvent) {
+    e?.preventDefault()
+    if (busyCreate) return
+    if (!email.trim() || !password) {
+      setError('Enter your email address and a password.')
+      return
+    }
+    if (password.length < 8) {
+      setError('Your password must be at least 8 characters.')
+      return
+    }
+    setBusyCreate(true)
     setError(null)
     try {
       await api.post('AuthApi/register', { email, password, name: name.trim() || undefined })
@@ -60,13 +71,18 @@ export default function CustomerSignIn({ me }: { me: Me }) {
     } catch (err) {
       setError(errorText(err, 'Could not create your account'))
     } finally {
-      setBusy(false)
+      setBusyCreate(false)
     }
   }
 
-  async function handleSignIn(e: FormEvent) {
-    e.preventDefault()
-    setBusy(true)
+  async function handleSignIn(e?: FormEvent) {
+    e?.preventDefault()
+    if (busySignIn) return
+    if (!email.trim() || !password) {
+      setError('Enter your email address and a password.')
+      return
+    }
+    setBusySignIn(true)
     setError(null)
     try {
       await api.post('AuthApi/password', { email, password })
@@ -74,12 +90,15 @@ export default function CustomerSignIn({ me }: { me: Me }) {
     } catch (err) {
       setError(errorText(err, 'Sign-in failed'))
     } finally {
-      setBusy(false)
+      setBusySignIn(false)
     }
   }
 
-  async function requestLink() {
-    setBusy(true)
+  async function requestLink(e?: FormEvent) {
+    e?.preventDefault()
+    if (busyLink) return
+    if (!forgotEmail.trim()) return
+    setBusyLink(true)
     setError(null)
     try {
       await api.post('AuthApi/request-link', { email: forgotEmail, next: '/my-orders' })
@@ -87,7 +106,7 @@ export default function CustomerSignIn({ me }: { me: Me }) {
     } catch (err) {
       setError(errorText(err, 'Could not send the link'))
     } finally {
-      setBusy(false)
+      setBusyLink(false)
     }
   }
 
@@ -110,7 +129,7 @@ export default function CustomerSignIn({ me }: { me: Me }) {
         {error && <Alert variant="destructive">{error}</Alert>}
         <div className="space-y-3 rounded-xl border bg-card p-5">
           <p className="text-sm text-muted-foreground">Nothing after a few minutes? Check spam, or ask again.</p>
-          <Button variant="outline" className="w-full" disabled={busy} onClick={() => requestLink()}>Send another link</Button>
+          <Button type="button" variant="outline" className="w-full" disabled={busyLink} onClick={() => requestLink()}>Send another link</Button>
         </div>
         <div className="text-center">
           <Button variant="link" size="sm" className="text-muted-foreground" onClick={() => setSent(false)}>Back to sign in</Button>
@@ -143,7 +162,7 @@ export default function CustomerSignIn({ me }: { me: Me }) {
           <form onSubmit={mode === 'create' ? handleCreate : handleSignIn} className="space-y-3">
             <div className="space-y-2">
               <Label htmlFor="customer-email">Email</Label>
-              <Input id="customer-email" type="email" required autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Input id="customer-email" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
             {mode === 'create' && (
               <div className="space-y-2">
@@ -156,14 +175,18 @@ export default function CustomerSignIn({ me }: { me: Me }) {
               <Input
                 id="customer-password"
                 type="password"
-                required
                 autoComplete={mode === 'create' ? 'new-password' : 'current-password'}
                 placeholder={mode === 'create' ? 'At least 8 characters' : 'Password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
-            <Button type="submit" className="w-full" disabled={busy}>
+            <Button
+              type="button"
+              className="w-full"
+              disabled={mode === 'create' ? busyCreate : busySignIn}
+              onClick={() => (mode === 'create' ? handleCreate() : handleSignIn())}
+            >
               {mode === 'create' ? 'Create account' : 'Sign in'}
             </Button>
           </form>
@@ -175,7 +198,7 @@ export default function CustomerSignIn({ me }: { me: Me }) {
         {emailSignIn ? (
           <div className="flex gap-2">
             <Input id="forgot-email" type="email" placeholder="you@example.com" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} />
-            <Button type="button" variant="outline" disabled={busy || !forgotEmail} onClick={requestLink}>Send link</Button>
+            <Button type="button" variant="outline" disabled={busyLink || !forgotEmail} onClick={() => requestLink()}>Send link</Button>
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">This app cannot send sign-in emails yet. Ask the shop to finish setting up email.</p>

@@ -128,9 +128,10 @@ export default function Login({ me }: { me: Me }) {
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [adminOpen, setAdminOpen] = useState(false)
   const [pwEmail, setPwEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [pwBusy, setPwBusy] = useState(false)
+  const [setupAsked, setSetupAsked] = useState(false)
   const googleRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -138,13 +139,24 @@ export default function Login({ me }: { me: Me }) {
     api.get<Partial<AuthConfig>>('AuthApi/config')
       .then((c) => { if (alive) setConfig(c && typeof c === 'object' ? c : {}) })
       .catch(() => { if (alive) setConfig({}) })
-    // Whether the administrator's seat is open, and how it is taken (SetupCard). A refusal — the
-    // preview copy answers 403 here — is "nothing to set up", never an error on the page.
-    api.get<Partial<BootstrapState>>('Bootstrap/')
-      .then((b) => { if (alive) setSetup(b && typeof b === 'object' ? b : null) })
-      .catch(() => { if (alive) setSetup(null) })
     return () => { alive = false }
   }, [])
+
+  // WHETHER THE ADMINISTRATOR'S SEAT IS OPEN IS ASKED ON DEMAND, NOT ON EVERY PAGE LOAD.
+  // `GET /Bootstrap/` answers 403 once this app HAS an administrator — the normal, correct state
+  // here, since the owner is invited and already set up — and the browser writes every refused
+  // request into the console as an error whether or not the page catches it, which is what a tester
+  // reported seeing on each load. The question is only interesting to somebody setting the app up,
+  // so the control below asks it, and nothing asks it otherwise.
+  async function askSetup() {
+    setSetupAsked(true)
+    try {
+      const b = await api.get<Partial<BootstrapState>>('Bootstrap/')
+      setSetup(b && typeof b === 'object' ? b : null)
+    } catch {
+      setSetup({ needed: false })
+    }
+  }
 
   // Render Google's button once the script is present. Nothing runs without a client id.
   useEffect(() => {
@@ -194,17 +206,32 @@ export default function Login({ me }: { me: Me }) {
     }
   }
 
-  async function signInWithPassword(e: FormEvent) {
-    e.preventDefault()
-    setBusy(true)
+  /**
+   * Sign in with a password. THE CLICK CALLS THIS DIRECTLY, and the form's submit only forwards to it,
+   * because a tester found this button doing nothing at all — no request, no error, no change on the
+   * page — which is what a submit that never reaches its handler looks like from outside. Everything
+   * that could swallow one is gone: the button is `type="button"` so it does not depend on form
+   * submission at all, the fields carry no `required` attribute (a browser blocking submission over
+   * one is silent, and the message below says the same thing visibly), and the busy flag is this
+   * form's own rather than the emailed-link form's, so nothing else on the page can leave it
+   * disabled. `pwBusy` also makes a second click while the first is in flight a no-op.
+   */
+  async function signInWithPassword(e?: FormEvent) {
+    e?.preventDefault()
+    if (pwBusy) return
     setError(null)
+    if (!pwEmail.trim() || !password) {
+      setError('Enter your email address and password.')
+      return
+    }
+    setPwBusy(true)
     try {
-      await api.post('AuthApi/password', { email: pwEmail, password })
+      await api.post('AuthApi/password', { email: pwEmail.trim(), password })
       location.replace(go(next))
     } catch (err) {
       setError(isApiError(err) && err.status === 403 ? 'Invalid email or password.' : errorText(err, 'Sign-in failed'))
     } finally {
-      setBusy(false)
+      setPwBusy(false)
     }
   }
 
@@ -267,19 +294,35 @@ export default function Login({ me }: { me: Me }) {
           </>
         )}
       </div>
-      <div className="text-center">
-        {/* The platform's QA finds these by this exact text and these autocomplete values. */}
-        <Button variant="link" size="sm" className="text-muted-foreground" onClick={() => setAdminOpen((v) => !v)}>
-          {adminOpen ? 'Hide admin sign-in' : 'Admin? Sign in with a password'}
-        </Button>
-        {adminOpen && (
-          <form onSubmit={signInWithPassword} className="mt-2 space-y-3 rounded-xl border bg-card p-5 text-left">
-            <Input type="email" required aria-label="Email" autoComplete="username" placeholder="Email" value={pwEmail} onChange={(e) => setPwEmail(e.target.value)} />
-            <Input type="password" required aria-label="Password" autoComplete="current-password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
-            <Button type="submit" className="w-full" disabled={busy}>Sign in</Button>
-          </form>
-        )}
+      {/*
+        Admin password sign-in: ALWAYS ON THE PAGE, never behind a toggle. It is the owner's way into
+        the /manage screens when mail is not set up, a tester could not use it at all, and a control
+        that has to be revealed before it can be used is one more thing between them and the shop.
+        The platform's QA finds these by this exact text and these autocomplete values.
+      */}
+      <div className="space-y-3 rounded-xl border bg-card p-5">
+        <p className="text-sm font-medium">Admin? Sign in with a password</p>
+        <form onSubmit={signInWithPassword} className="space-y-3">
+          <Input type="email" aria-label="Email" autoComplete="username" placeholder="Email" value={pwEmail} onChange={(e) => setPwEmail(e.target.value)} />
+          <Input type="password" aria-label="Password" autoComplete="current-password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <Button type="button" className="w-full" disabled={pwBusy} onClick={() => signInWithPassword()}>Sign in</Button>
+        </form>
       </div>
+
+      {/* The customer's own door is a different page (/sign-in): this one is the owner's. */}
+      <p className="text-center text-sm text-muted-foreground">
+        Ordering as a customer?{' '}
+        <Link to="/sign-in" className="font-medium text-primary underline-offset-4 hover:underline">Create an account or sign in here</Link>
+      </p>
+
+      {!setupAsked && (
+        <div className="text-center">
+          <Button variant="link" size="sm" className="text-muted-foreground" onClick={askSetup}>Setting this app up for the first time?</Button>
+        </div>
+      )}
+      {setupAsked && setup?.needed !== true && (
+        <p className="text-center text-sm text-muted-foreground">This app already has an administrator.</p>
+      )}
     </AuthFrame>
   )
 }
