@@ -3,43 +3,45 @@
 ## 1. Product
 
 A phone-first ordering site for one pizza shop. Customers browse the menu, build a basket, choose
-pickup or delivery, give a name and phone number (and an address for delivery), and check out as a
-guest — there are no customer accounts. The shop owner signs in with a link emailed to them and gets
-three screens: a live order queue, a menu editor and shop settings.
+pickup or delivery, give a name and phone number (and an address for delivery), and check out —
+as a guest, or signed in to a customer account that keeps their order history. The shop owner signs
+in with a link emailed to their invited address and gets three screens: a live order queue, a menu
+editor and shop settings.
 
 Decided with the owner before the build, and load-bearing:
 
-- **Guest checkout.** No customer accounts, no order history, no password. The only person who signs
-  in is the owner, by emailed link, and only invited addresses can get an account at all
-  (`accessModel.signUp: "invited"`). There are no staff logins in this version.
-- **Fixed menu.** No sizes, crusts or toppings to choose. An item is a name, a description, a price
-  and a category.
-- **ASAP only.** No scheduling an order for later.
-- **Menu prices are final.** No tax line anywhere; the total is the lines plus the delivery fee.
-- **Delivery by postcode list.** The owner keeps a list of postcodes. A delivery address whose
-  postcode is not on the list is refused at checkout with an offer of pickup instead.
-- **One flat delivery fee**, set by the owner, added to every delivery order.
-- **Payment through the owner's own Stripe account.** Until that key is in place, checkout places the
-  order with `paymentStatus: 'pay_at_store'`. Once it is there, checkout creates a Stripe Checkout
-  Session and the order only joins the owner's queue when the payments kit's `StripeWebhook`
-  confirms payment. Both paths must keep working — never assume the key is present.
-- **Twelve-month retention.** Name, phone and delivery address are cleared from an order twelve
-  months after it was placed. The order, its lines and its totals are kept for good.
+- **Guest checkout is untouched.** Nobody has to make an account to order. A visitor who is not
+  signed in gets exactly the checkout they get today, and the order they place carries no account.
+- **Customer accounts, email and password.** Anyone may create one (`accessModel.signUp: "open"`).
+  A customer account is role `member`; it changes nothing about who may manage the shop, which is
+  still role exactly `admin` and still only the owner's invited address. A forgotten password is
+  recovered by an emailed link that signs them in, after which they set a new one.
+- **An account lasts until its customer deletes it.** There is no expiry and no inactivity sweep.
+  Deleting an account removes the `User` row and clears `customerUserId` on that customer's orders,
+  which stay in the shop's records as ordinary orders.
+- **A menu item may have one photo.** JPEG or PNG, at most 5 MB as stored, shown on the public menu
+  beside the item. The owner may replace or remove it; an item without one looks as it does today.
+- **Fixed menu.** No sizes, crusts or toppings. **ASAP only**, no scheduling. **Menu prices are
+  final**, no tax line. **Delivery by postcode list**, **one flat delivery fee** the owner sets.
+- **Payment through the owner's own Stripe account.** Until that key is in place, checkout places
+  the order with `paymentStatus: 'pay_at_store'`. Both paths must keep working.
+- **Twelve-month retention on an order's personal details**, unchanged, and it applies the same way
+  to a guest order and to a signed-in customer's order. It never touches the account itself.
 
 Form factor: phone. One thing per screen, big tap targets, no side-by-side panes. Look: `studio`.
 
-### This pass: the 400 on every admin write
+### This pass
 
-The owner reported that saving a new menu item answers "Bad Request". The same fault breaks editing
-an item and all three order-status buttons; the owner was asked and chose to have the menu editor
-and the order-status buttons fixed together. The cause was found at plan time by comparing the
-writes that fail against the ones that do not, and it is one line of the same mistake in two files —
-§8 states it as a rule. Nothing else in the product changes: no new table, no new field, no new
-screen, no new route, no change to who may do what.
+Three things, and nothing else: customer accounts with email-and-password sign-in; a signed-in
+customer's order linked to their account and listed on a page of their own; and a photo per menu
+item, uploaded in the editor and shown on the public menu.
 
-Three reports are deliberately out of scope and must not be "fixed on the way past": seeded demo
-orders showing £0.00 per line, new orders needing a reload to appear on `/manage/orders`, and the
-'Estimated ready' wording on the confirmation page.
+Out of scope, and not to be "fixed on the way past": saved cards, loyalty or rewards; editing or
+cancelling a placed order from the account; attaching a customer's earlier guest orders to a new
+account; more than one photo per item or any cropping tool; and any change to who may sign in as
+the shop owner. The two open frontend reports from the last pass — new orders needing a reload on
+`/manage/orders`, and the 'Estimated ready' wording on the confirmation page — are also still open
+and still out of scope here.
 
 ## 2. Stack
 
@@ -623,154 +625,178 @@ each job. These are the template's, for hazards an app's own code can hit and §
 - 2026-11-11: **Signed in as admin (owner@example.com), on /manage/orders. Clicking 'Mark preparing' on any Received order returns a 'Bad Request' banner on the page and the underlying call fails: PUT /preview/OrderAdminApi/<id> 400. Reproduced on three different orders (ids c548b224-d5c1-4566-81d7-be61efcc10fd and order-0002) for 'Mark preparing', 'Mark ready' and 'Cancel order' actions — every status-changing PUT to OrderAdminApi returned 400 and no order's status changed on reload. The owner cannot currently advance or cancel any order.** → cost: one more pass over backend → rule: backend must keep "update-order-status" working → enforced by: story update-order-status in the next test run <!-- gotcha:qa1-update-order-status -->
 - 2026-11-11: **resources/MenuAdminApi.js: Every PATCH to MenuAdminApi (menu item edits) returns 400 Bad Request regardless of which field changes (price or description), on the live /preview deployment. Blocks the owner from editing any menu item.** → cost: one more pass over backend → rule: backend must keep "resources/MenuAdminApi.js: Every PATCH to MenuAdminApi (menu item edits) returns 400 Bad Request regardless of which field changes (price or description), on the live /preview deployment. Blocks the owner from editing any menu item." working → enforced by: the next test run <!-- gotcha:qa1-resources-MenuAdminApi-js-Every-PATCH-to -->
 - 2026-11-11: **resources/OrderAdminApi.js: Every status-changing PUT to OrderAdminApi (Mark preparing, Mark ready, Cancel order) returns 400 Bad Request on the live /preview deployment across multiple distinct orders. Blocks the owner from advancing or cancelling any order.** → cost: one more pass over backend → rule: backend must keep "resources/OrderAdminApi.js: Every status-changing PUT to OrderAdminApi (Mark preparing, Mark ready, Cancel order) returns 400 Bad Request on the live /preview deployment across multiple distinct orders. Blocks the owner from advancing or cancelling any order." working → enforced by: the next test run <!-- gotcha:qa1-resources-OrderAdminApi-js-Every-status- -->
+- 2026-11-14: **A visitor cannot create an account with email+password directly: /login only offers a magic-link email field for customers (plus a broken admin-only password toggle). An account must first exist via magic-link sign-in; only afterward, from /my-orders, can the customer 'Set a new password' (verified: PUT /AccountApi/password -> 200 while signed in as customer2@example.com, and the resulting password does authenticate -- POST /AuthApi/password for customer2@example.com + the new password returned 200 with the correct member user). However the second half of the story ('signing in again later with that email and password returns them to their account') cannot be done through the UI at all, because the only password sign-in control in the app (the same one used for admin) is non-functional -- clicking it fires no request. So the story as written (create via email+password, sign in again with it) is not deliverable end-to-end through the product's UI, even though the underlying API supports password auth.** → cost: one more pass over frontend → rule: frontend must keep "customer-create-account" working → enforced by: story customer-create-account in the next test run <!-- gotcha:qa1-customer-create-account -->
+- 2026-11-14: **GET /MenuApi shows photoUrl set for two items (Margherita: /MenuPhotoApi/menu-margherita?v=..., Pepperoni: /MenuPhotoApi/menu-pepperoni?v=...), but both URLs 404 ({"error":"not found"}) whether fetched with or without the query string. On the home page, the browser's own requests for these two photo URLs also returned 404 and logged as console errors, so the items with a photo render a broken image instead of the photo, failing the first acceptance line. Items with no photo (photoUrl: null) render the menu normally with no broken image, satisfying the second acceptance line.** → cost: one more pass over backend → rule: backend must keep "public-menu-shows-photo" working → enforced by: story public-menu-shows-photo in the next test run <!-- gotcha:qa1-public-menu-shows-photo -->
+- 2026-11-14: **The admin password sign-in submit button on /login does nothing when clicked: no network request, no console error, no DOM change, reproduced across 8+ distinct, verified-correct element selectors. This blocks the owner from reaching any /manage screen through the UI at all, even though POST /AuthApi/password works correctly when called directly with the same credentials (200, correct admin user). This blocked verification of this pass's own stated fix (menu editor writes, order-status writes) through the browser.** → cost: one more pass over frontend → rule: frontend must keep "The admin password sign-in submit button on /login does nothing when clicked: no network request, no console error, no DOM change, reproduced across 8+ distinct, verified-correct element selectors. This blocks the owner from reaching any /manage screen through the UI at all, even though POST /AuthApi/password works correctly when called directly with the same credentials (200, correct admin user). This blocked verification of this pass's own stated fix (menu editor writes, order-status writes) through the browser." working → enforced by: the next test run <!-- gotcha:qa1-The-admin-password-sign-in-submit-button -->
+- 2026-11-14: **GET /Bootstrap/ returns 403 on every /login page load and is logged as a console error, even though this is the expected/correct state once an admin account already exists.** → cost: one more pass over frontend → rule: frontend must keep "GET /Bootstrap/ returns 403 on every /login page load and is logged as a console error, even though this is the expected/correct state once an admin account already exists." working → enforced by: the next test run <!-- gotcha:qa1-GET-Bootstrap-returns-403-on-every-login -->
+- 2026-11-14: **MenuApi publishes photoUrl values (for Margherita and Pepperoni) that point at MenuPhotoApi paths which 404 -- the photo endpoint and the URL it is supposed to serve are out of sync, so every item that has a photo shows a broken image on the public menu.** → cost: one more pass over backend → rule: backend must keep "MenuApi publishes photoUrl values (for Margherita and Pepperoni) that point at MenuPhotoApi paths which 404 -- the photo endpoint and the URL it is supposed to serve are out of sync, so every item that has a photo shows a broken image on the public menu." working → enforced by: the next test run <!-- gotcha:qa1-MenuApi-publishes-photoUrl-values-for-Ma -->
 
 ## 8. Data model
 
-Four tables in `schema.graphql`. `User`, `MagicLink`, `EmailLog` and `EmailSuppression` come from the
-sign-in kit and `StripeEvent` from the payments kit, each in its own `schema.*.graphql` — never
-redeclare one, and never `@relationship` across files. **No table, field, index or directive changes
-in this pass.**
+Five tables in `schema.graphql`. `User`, `MagicLink`, `EmailLog` and `EmailSuppression` come from
+the sign-in kit and `StripeEvent` from the payments kit, each in its own `schema.*.graphql` — never
+redeclare one, and never `@relationship` across files. **This pass is additive only**: two new
+nullable fields and one new table. Nothing is renamed, retyped or dropped.
 
-### The rule this pass exists for: never write a timestamp Harper owns
+### The rule that still governs every write: never write a timestamp Harper owns
 
-**A field declared `@createdTime` or `@updatedTime` is assigned by Harper, in epoch milliseconds. No
+A field declared `@createdTime` or `@updatedTime` is assigned by Harper in epoch milliseconds. No
 record this app writes may carry a key for one — not a fresh value, and not the value just read off
-the stored row.** Harper refuses such a write with a bare `400` carrying no JSON body, which is why
-the page showed the bare statusText `"Bad Request"` with no message: the refusal happened above this
-app's code, so no handler of ours ever ran and no `error` key was ever produced.
+the stored row. Harper refuses such a write with a bare `400` and no JSON body, which is the whole
+of the defect that made every menu save and every order-status tap answer "Bad Request". **The trap
+is the spread, not the literal**: `{ ...existing, status }` names `updatedAt` because the stored row
+has one. Every writer passes its record through `withoutManaged(record, table)` from
+`lib/managed-fields.js`, and `managed-fields-probe` holds `MANAGED_FIELDS` equal to the
+`@createdTime`/`@updatedTime` fields the SDL declares. The fields are `MenuItem.createdAt`,
+`MenuItem.updatedAt`, `Order.updatedAt` and `StoreSetting.updatedAt`.
 
-The fields are `MenuItem.createdAt`, `MenuItem.updatedAt`, `Order.updatedAt` and
-`StoreSetting.updatedAt`. The evidence that this is the fault, rather than another theory:
+The new work obeys it in two places that are easy to get wrong: stamping `MenuItem.photoUpdatedAt`
+after an upload restates a stored MenuItem row, and clearing `Order.customerUserId` during account
+deletion restates a stored Order row. Both go through `withoutManaged()`. **`MenuItemPhoto` carries
+no managed field at all** — `uploadedAt` is a plain string the app writes — so replacing a photo
+cannot reintroduce the fault on a new table.
 
-- `MenuAdminApi` create wrote `createdAt` and `updatedAt` explicitly → 400.
-- `MenuAdminApi` update wrote `updatedAt` explicitly and carried `createdAt` through from the stored
-  row → 400, including on a save that changed no values.
-- `OrderAdminApi.applyStatus` spread the stored row (`{ ...existing, status, queue }`), and the
-  stored row carries `updatedAt` → 400, on seeded and freshly created orders alike.
-- `StoreSettingsApi.put` builds its record from a constant id plus validated fields and never names
-  `updatedAt` → 200 throughout. This is the control, and it is why the fault looked specific to two
-  resources rather than to one shape.
-- `CheckoutApi` creates an order from a fresh literal with no `updatedAt` → 200.
-- Every write to `User` succeeds, and `User.createdAt`/`User.updatedAt` are plain `String` fields
-  with no directive — the same code shape, on a table where those two names are the app's to set.
-- `data/*.yaml` carries neither field, so the seeded rows load.
+The tables:
 
-Two corollaries that are easy to get wrong:
-
-- **Reads now return numbers.** Once the app stops writing them, `createdAt` and `updatedAt` come
-  back as epoch milliseconds. `adminMenuItem` and `adminOrderView` pass them straight through, so
-  anything that renders one must accept a number — and rows written before this fix may still hold
-  an ISO string, so both shapes must render. Do not convert them in the resource; format at the
-  edge.
-- **This also closes a type error.** The code was putting ISO strings into fields declared `Long`.
-  The schema is right and the code was wrong, so the schema does not move.
-
-**Why no hermetic suite caught it:** `scripts/probe/harperdb-stub.js` accepts any attribute, so
-`MenuAdminApi-probe` and `OrderAdminApi-probe` drive these exact routes and pass. That is what made
-it look as though the fault "lives above the resource". The probes therefore assert the **shape of
-the record handed to `db.<Table>.put`/`patch`** — that it carries no key named by a `@createdTime` or
-`@updatedTime` field — with the negative control being a record that does carry one. Asserting the
-stub's 200 proves nothing. The list of those field names is `MANAGED_FIELDS`, and because the write
-assertions read it, it cannot also be their reference: `managed-fields-probe` is the one suite that
-reads `schema.graphql` itself and requires the map to equal what the SDL declares.
-
-**Evidence standard for this fix (CLAUDE.md §2, §6):** the change is tier-1 only when one raw
-response is captured whole from the live preview — status, headers and body bytes — for a menu save
-and an order-status save, with the Harper version noted. Two earlier rounds reshaped these routes on
-an untested theory; do not reshape them a third time.
-
-The tables themselves:
-
-- **`MenuItem`** — one row per menu item. `priceCents` is a whole-cent `Int`; no floats anywhere in
-  money. `category`, `available` and `sortOrder` are indexed because the menu is read as
-  `available == true` sorted by `category` then `sortOrder` — a list page sorting on an unindexed
-  field with no filter beside it is a 404, not a slow query.
-- **`Order`** — one row per order, `@table(audit: true)`. The audit store is not decoration: the
-  owner's queue subscribes to this table for live arrivals, and `Table.subscribe()` refuses a table
-  without one.
-  - `items` is a `[Any]` **snapshot** — `{menuItemId, name, priceCents, quantity}` per line, copied
-    from `MenuItem` at checkout. A later price change or a deleted item must never alter an order
-    that has already been placed, so nothing reads prices back through `menuItemId`.
-  - `code` is 32 random URL-safe characters and is the only key the confirmation page uses.
-  - `queue` is `pending_payment` | `active` | `done`, so the owner's list is one indexed equality
-    plus a sort rather than a scan. `status` is `awaiting_payment` | `received` | `preparing` |
-    `ready` | `collected` | `cancelled`, and the queue is always derived from the status so the two
-    cannot disagree.
-  - `paymentStatus` is `unpaid` | `paid` | `pay_at_store`; `paymentRef` holds the Stripe Checkout
-    Session id and is indexed so the webhook finds the order.
-  - `personalDetailsClearedAt` is null until the retention sweep clears the row's name, phone,
-    address and postcode; indexed, because the sweep filters on it.
-- **`StoreSetting`** — exactly one row, id `store`, read by primary key. Every reader falls back to
-  built-in defaults when it is absent, so the published app works before the owner has ever saved.
-  No field is indexed: there is one row and it is fetched by id.
+- **`MenuItem`** — one row per menu item. `priceCents` is whole cents; no floats in money.
+  `category`, `available` and `sortOrder` are indexed because the menu is read as `available == true`
+  sorted by `category` then `sortOrder`. **New: `photoUpdatedAt`**, a plain ISO string the app
+  writes, null when the item has no photo. It is not indexed because nothing filters or sorts by it:
+  it is read off rows the menu already has, and it doubles as the `?v=` cache-buster on the photo
+  URL so a replaced photo is not served from a stale cache.
+- **`MenuItemPhoto`** — **new**. One row per photographed item, `id` = the `MenuItem` id, so an item
+  has at most one photo by construction and replacing one is a `put` on the same key rather than a
+  uniqueness check Harper cannot make. `data` is a `Blob`: stored outside the record and streamable,
+  which is why the bytes never ride along on a menu listing. Per rule 8 the write is
+  `new Blob([buf], { type })`, never `createBlob`, and it is **verify-on-write** — read the stored
+  blob's size back and delete the row if it does not match what was written, so a half-written photo
+  never leaves a record pointing at nothing. The upload body is base64 in JSON rather than raw bytes:
+  Harper hands a `Resource` a parsed body, and the base64 path needs no raw-body capture. Limits
+  live in one module with the other menu rules: `image/jpeg` or `image/png` only, 5 MB decoded.
+- **`Order`** — one row per order, `@table(audit: true)`; the audit store is what lets the owner's
+  queue subscribe. `items` is a `[Any]` snapshot of `{menuItemId, name, priceCents, quantity}` taken
+  at checkout, so a later price change never rewrites a placed order and **nothing reads a price back
+  through `menuItemId`** — including anything to do with photos. `code` is 32 random URL-safe
+  characters and is the only key the confirmation page uses. `queue` is derived from `status`, never
+  sent. `paymentStatus`/`paymentRef` as today. **New: `customerUserId`**, the `User` id of the
+  signed-in customer who placed it and null for a guest order. Indexed, because the customer's own
+  list is that equality plus a sort on the indexed `placedAt` — a list page sorting on an unindexed
+  field with no filter beside it is a 404, not a slow query. It is written from the session at
+  checkout and never from a request body, and it is the only new way an order can be reached.
+- **`StoreSetting`** — exactly one row, id `store`, read by primary key, defaults in code.
 - **`LoopRun`** — the template's. The nightly retention sweep writes one row per occurrence with the
   deterministic id `clear-personal-details:YYYY-MM-DD`, claimed before the work is done.
 
-The sweep lives behind `resources/Scheduler.js` (rule 17) as a loop in `lib/loops/`: find orders with
-`placedAt` less than the cutoff (indexed range) and `personalDetailsClearedAt == null`, clear the
-four personal fields, stamp the timestamp. It never arms in the preview copy.
+Retention is unchanged and is deliberately not extended to accounts: the sweep clears an order's
+name, phone, address and postcode twelve months after `placedAt` and stamps
+`personalDetailsClearedAt`, whether or not the order has a `customerUserId`, and it never touches a
+`User` row. **An account ends only when its customer deletes it.** A cleared order still appears in
+that customer's history with its code, date, items, total and status — the personal fields are what
+went, not the order.
 
 ## 9. Auth and owner rules
 
-`accessModel`: `signIn: "optional"`, `signUp: "invited"`, `entry: "/"`, `callerAuth: "none"`. The shop
-is open to anyone; signing in is what makes you the owner. The sign-in kit supplies `AuthApi`,
-`AdminApi`, `AccountApi`, `Bootstrap` and `InboundEmailApi` — never write a second sign-in, a second
-session cookie or a second invite flow beside them. **Nothing in this section changes this pass**, and
-that is a constraint on the fix: the 400 is not an access-control problem and no owner rule may be
-loosened while chasing it.
+`accessModel`: `signIn: "optional"`, **`signUp: "open"`**, `entry: "/"`, `callerAuth: "none"`. The
+shop is open to anyone; signing in as a customer adds an order history; signing in as the owner is
+what reaches the management screens.
+
+**`signUp` moves from `invited` to `open` this pass, and that is the only change to the front door.**
+It is set by the deploy from this field (`AUTH_OPEN_SIGNUP`) and by nothing else — no sentence in
+this file turns it on. Open sign-up creates **`role: 'member'`** rows and nothing more: the owner's
+seat is still taken only through `ownerMayJoin`/`Bootstrap` or an admin invite, and every management
+route still demands role exactly `admin`, re-read from the `User` row on every call. Opening sign-up
+must never be read as opening the owner screens.
+
+**There is one sign-in in this app and it is the kit's.** Do not write a second session cookie, a
+second credential store or a parallel auth resource. What this pass needs that the kit does not yet
+do is added **inside the kit's own files**, which are this app's files now:
+
+- `resources/AuthApi.js` — **`POST /AuthApi/register`** `{ email, password, name? }`: refuses unless
+  `config.auth.openSignup()`, normalizes the address, creates the row through `claimUserForEmail`
+  with `role: ROLE_MEMBER` (so the tier's account quota still applies and its refusal is surfaced
+  verbatim by the page), stores `passwordHash` with the kit's `hashPassword`, and mints the same
+  session cookie the other routes mint. An address that already exists gets one generic refusal that
+  does not distinguish "taken" from "wrong password" on a later attempt.
+- `resources/AuthApi.js` — **`POST /AuthApi/password`** currently requires `row.role === ROLE_ADMIN`.
+  It now admits any row with a `passwordHash` that is not deactivated. Everything else stays exactly
+  as it is: the same fixed-window counter on `passwordAttemptTimestamps` before the role is looked
+  at, the same PBKDF2 burn for an unknown address, the same single message for every failure
+  (rule 25), and the same 403 — never a 401 (rule 20).
+- `resources/AccountApi.js` — **`PUT /AccountApi/password`** `{ password }` for the signed-in caller,
+  on their own row only, and **`DELETE /AccountApi/`**, which deletes the caller's own `User` row and
+  first clears `customerUserId` on every order carrying it (indexed equality, `withoutManaged`), so
+  the orders survive as guest orders. Both operate on `loadCaller(this)` and accept no id.
+
+**Forgotten passwords reuse the kit's magic link and add no token table.** The customer asks for a
+link with the existing `POST /AuthApi/request-link`; `MagicLink` already expires in 900 seconds and
+is keyed by the token hash; redeeming it signs them in exactly as it does for the owner, and they
+then set a new password with `PUT /AccountApi/password`. No reset-specific token, no second code
+path. Email goes out through the kit's `lib/email.js` to `api.resend.com`; with no mail key the kit
+refuses with `email_not_configured` and the page says so plainly.
 
 Every resource sets `static loadAsInstance = false` and `target.checkPermission = false` first: this
-app's people are `User` rows, not Harper roles, so the row rule in the resource IS the access control.
-An unauthenticated refusal is a thrown `Response` 403 with `code: 'auth_required'` — never 401.
+app's people are `User` rows, not Harper roles, so the row rule in the resource **is** the access
+control. An unauthenticated refusal is a thrown `Response` 403 with `code: 'auth_required'`.
 
 | Resource | Rule |
 |---|---|
-| `MenuApi` | public, read-only, available items only |
-| `StoreInfoApi` | public, read-only, the shop-level facts a customer needs; nothing private |
-| `CheckoutApi` | public write. **Never trust the basket.** Every line is re-read from `MenuItem` and re-priced server-side; the fee and the postcode rule come from `StoreSetting`; the caller may not set totals, `status`, `queue`, `paymentStatus`, `paymentRef` or `code` |
-| `OrderConfirmationApi` | public, but reachable only by the order's own random `code`. No listing, no enumeration, one order per request |
+| `MenuApi` | public, read-only, available items only; returns a photo URL, never photo bytes |
+| `StoreInfoApi` | public, read-only, shop-level facts; nothing private |
+| `MenuPhotoApi` | public, read-only, one photo by primary key. No listing and nothing but the image: a photo is as public as the menu it is on |
+| `CheckoutApi` | public write, guest or signed in. **Never trust the basket**: lines re-read from `MenuItem` and re-priced, fee and postcode rule from `StoreSetting`. The caller may not set totals, `status`, `queue`, `paymentStatus`, `paymentRef`, `code` — **nor `customerUserId`**, which comes from the session or stays null |
+| `OrderConfirmationApi` | public, reachable only by the order's own random `code`. One order per request, no listing, unchanged for guests |
+| `CustomerOrderApi` | **owner rule on `customerUserId`** — the session's user id and nothing from the query. A guest order (null) is reachable by nobody here, and one customer can never read another's |
 | `MenuAdminApi` | admin |
+| `MenuPhotoAdminApi` | admin |
 | `StoreSettingsApi` | admin (reads `LoopRun` for the last-cleared date; never writes it) |
 | `OrderAdminApi` | admin — the only place customer names, phones and addresses are listed |
 
-An admin check is role exactly `admin` on the session's user, re-read from the `User` row on every
-call, on every method including the SSE stream: `connect`/`subscribe` runs the same authorization
-entry as a REST request, so the rule is written once in the resource and covers the live stream too.
+The webhook is the payments kit's `StripeWebhook` and nothing here re-implements it: signature over
+the raw bytes, idempotent on the Stripe event id, refuses in the preview copy. It sets
+`paymentStatus`, `status` and `queue` on the order whose `paymentRef` matches, and it must not touch
+`customerUserId`.
 
-The writes fixed this pass keep every rule they already enforce: `MenuAdminApi` still restates `id`
-and `createdAt` from the stored row rather than the body, and `OrderAdminApi` still writes only the
-status and the queue derived from it, so a body naming `code`, `items`, a total, `paymentStatus` or a
-customer's details changes nothing.
-
-The webhook is the payments kit's `StripeWebhook` and nothing in this app re-implements it: its
-signature is checked over the raw bytes, it is idempotent on the Stripe event id, and it refuses in
-the preview copy. Its only job here is to set `paymentStatus: 'paid'`, `status: 'received'` and
-`queue: 'active'` on the order whose `paymentRef` matches.
+Each new owner-scoped surface gets its own suite: `CustomerOrderApi-probe` drives one customer's
+request and asserts the other customer's order is absent and a guest order is absent, with the
+negative control being the filter removed; `MenuPhotoAdminApi-probe` asserts the admin refusal, the
+content-type and size refusals, and — because the stub accepts any field — the **shape of the record
+handed to `db.MenuItem.put`**, which must name no managed field.
 
 ## 10. Pages
 
-Phone-first, `studio` look. Eight routes, unchanged; `/order/:code` is the only wildcard, so
-`routes/spa.js` carries `/order/*` and `/order` answers too (rule 26).
+Phone-first, `studio` look. Ten app routes. `/order/*` is the only wildcard, so `/order` answers too
+(rule 26). The sign-in kit's own routes (`/login`, `/auth/verify`, `/invite`, `/account`, `/admin/*`)
+come from `routes/spa.sign-in.json` and must not be repeated in `src/routes.ts`.
 
 | Route | Who | What it does |
 |---|---|---|
-| `/` | anyone | The menu by category with a running basket. Entry route. Shows the paused message instead of the basket when ordering is off |
+| `/` | anyone | The menu by category with a running basket; photos beside the items that have one. Entry route |
 | `/basket` | anyone | Quantities, removals, running total |
-| `/checkout` | anyone | Pickup or delivery; name and phone always, address and postcode for delivery only. Postcode checked against the delivery list before the order can be placed. Places the order, then sends the customer to Stripe when a key is configured |
-| `/order/:code` | anyone with the link | Confirmation: order number, lines, total, pickup or delivery, payment state, estimated ready time, and the current status |
+| `/checkout` | anyone | Pickup or delivery, name and phone, address and postcode for delivery. Guest by default; prefilled from the customer's last order when signed in, and still fully editable |
+| `/order/:code` | anyone with the link | Confirmation: order number, lines, total, fulfilment, payment state, estimate, status |
+| `/sign-in` | a customer | **New.** Create an account or sign in with email and password; 'email me a link' for a forgotten password |
+| `/my-orders` | a signed-in customer | **New.** Their own past orders, newest first; set a new password; delete my account |
 | `/manage` | owner | Hub: how many orders are waiting, links to the three screens |
-| `/manage/orders` | owner | The live queue. One tap advances the status — **fixed this pass**. New orders arriving without a reload is a known gap and stays out of scope |
-| `/manage/menu` | owner | Add, edit, hide and remove items; change prices — **fixed this pass** |
-| `/manage/settings` | owner | Pause ordering, pickup/delivery switches, delivery fee, postcode list, time estimates, last-cleared date |
+| `/manage/orders` | owner | The live queue; one tap advances the status |
+| `/manage/menu` | owner | Add, edit, hide and remove items; change prices; **add, replace or remove a photo** |
+| `/manage/settings` | owner | Pause ordering, pickup/delivery, fee, postcodes, estimates, last-cleared date |
 
-No page's API calls change. The one frontend consequence of the fix is that `createdAt` and
-`updatedAt` now arrive as epoch-millisecond numbers, while rows written before the fix may still hold
-ISO strings, so any formatter that touches them accepts both and renders nothing rather than
-`Invalid Date` for neither.
+The owner's `/login` stays the owner's: the header's 'Sign in' sends a customer to `/sign-in`, and
+nothing links a customer to the invite flow.
+
+**Photos on the page.** `MenuApi` returns `photoUrl` only for an item whose `photoUpdatedAt` is set,
+and the menu renders an `<img>` only when it is there — no placeholder element, no request, no
+broken image for an item without one. The image sits in a fixed-size frame with `loading="lazy"` so
+the list does not reflow as photos arrive, and an `onError` hides the frame rather than leaving a
+broken icon. In the editor the chosen file is drawn to a canvas and re-encoded as JPEG no wider than
+1200 px before upload, which is browser code and needs no package; the server's 5 MB and
+content-type checks are the guard behind it, not the mechanism.
 
 Every page guards the shape it was handed (`r?.lines ?? []`, `Array.isArray(r?.rows)`) and renders an
 empty state: the page-boot probe answers `{}` to any GET it has no fixture for, exactly as a
-half-deployed API would.
+half-deployed API would. `/my-orders` must boot for a signed-out visitor and show the prompt, and
+`createdAt`/`updatedAt` still arrive as epoch-millisecond numbers on rows written since the managed-
+fields fix and as ISO strings on older ones, so any formatter accepts both.
 
 ## 11. Added by kits
 
@@ -794,3 +820,5 @@ half-deployed API would.
 - 2026-11-11: **Taking payments needs your Stripe account. I'll build invite codes now and add checkout when you connect Stripe. Is that right?** → Yes, invite codes for now <!-- decision:payments -->
 - 2026-11-11: **Will anyone besides you need their own login to see and manage incoming orders, like kitchen staff?** → Just me <!-- decision:staff_access -->
 - 2026-11-12: **You reported that saving a new menu item fails with a "Bad Request" error — I'll fix that, and editing an existing item, which fails the same way. Testing found the same kind of failure on your order queue: "Mark preparing", "Mark ready" and "Cancel order" all fail too. How much should I fix in this pass?** → The menu editor and the order status buttons <!-- decision:architect:fix_scope -->
+- 2026-11-14: **If a customer forgets the password on their account, how should they get back in?** → Email them a link to set a new password <!-- decision:architect:forgot_password -->
+- 2026-11-14: **Customer accounts are a new thing your shop will hold on to: an email address, a password and a name. Orders already clear their personal details after twelve months. How long should an account itself last?** → Keep it until the customer deletes it <!-- decision:architect:keep_accounts -->

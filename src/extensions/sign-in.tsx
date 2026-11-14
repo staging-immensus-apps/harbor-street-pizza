@@ -8,7 +8,7 @@
 // scope (rule 14). The session is loaded in the provider's effect.
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { Link, Navigate, useLocation } from 'react-router-dom'
 import { api, go, onApiRefusal } from '@/api/client'
 import type { Me } from '@/api/sign-in'
 import type { AppRoute } from '@/routes'
@@ -53,17 +53,34 @@ export function NavItems() {
   return <Link to="/admin" className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">Admin</Link>
 }
 
-/** Who is signed in, and the way out or in. */
+/**
+ * Who is signed in, and the way out or in.
+ *
+ * TWO SIGN-INS SHARE THIS APP AND THIS HEADER, and this is the one place that tells them apart.
+ * `/login` is still the owner's door (password or an emailed link to their invited address,
+ * unchanged); `/sign-in` is the customer's own, newly added this pass (CLAUDE.md "This pass").
+ * A signed-out visitor is a prospective customer here, never the owner walking past, so the
+ * header's own "Sign in" points at `/sign-in` — the owner still reaches `/login` directly, or via
+ * the `admin: true` Guard below when they try a /manage page signed out. `next` carries them back
+ * to checkout when that is where they were, otherwise to their own orders (the page plan's
+ * CustomerSignIn note). A signed-in ADMIN still lands on `/account` (unchanged); a signed-in
+ * CUSTOMER lands on `/my-orders`, which is this app's own page and not the kit's `/account`.
+ */
 export function HeaderEnd() {
   const me = useMe()
+  const routerLocation = useLocation()
   async function signOut() {
     await api.post('AuthApi/logout')
     location.replace(go('/'))
   }
-  if (!me.authenticated) return <Button asChild size="sm"><Link to="/login">Sign in</Link></Button>
+  if (!me.authenticated) {
+    const next = routerLocation.pathname.startsWith('/checkout') ? '/checkout' : '/my-orders'
+    return <Button asChild size="sm"><Link to={`/sign-in?next=${encodeURIComponent(next)}`}>Sign in</Link></Button>
+  }
+  const target = me.user.role === 'admin' ? '/account' : '/my-orders'
   return (
     <>
-      <Link to="/account" className="max-w-32 truncate text-muted-foreground transition-colors hover:text-foreground sm:max-w-56">{me.user.name || me.user.email}</Link>
+      <Link to={target} className="max-w-32 truncate text-muted-foreground transition-colors hover:text-foreground sm:max-w-56">{me.user.name || me.user.email}</Link>
       <Button variant="ghost" size="sm" onClick={signOut}>Sign out</Button>
     </>
   )

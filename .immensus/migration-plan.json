@@ -1,3 +1,32 @@
 {
-  "migrations": []
+  "migrations": [
+    {
+      "id": "001-order-customer-user-id",
+      "kind": "add_field",
+      "table": "Order",
+      "field": "customerUserId",
+      "type": "String @indexed",
+      "backfill": "none",
+      "script": null,
+      "note": "Additive and nullable. Every existing order keeps null, which is exactly right: they were placed as guests and must not appear in anybody's account (story customer-view-past-orders). Nothing is renamed, nothing is dropped."
+    },
+    {
+      "id": "002-menu-item-photo-updated-at",
+      "kind": "add_field",
+      "table": "MenuItem",
+      "field": "photoUpdatedAt",
+      "type": "String",
+      "backfill": "none",
+      "script": null,
+      "note": "Additive and nullable. Every existing item keeps null, meaning no photo, and the menu renders as it does today."
+    },
+    {
+      "id": "003-menu-item-photo-table",
+      "kind": "add_table",
+      "table": "MenuItemPhoto",
+      "script": null,
+      "note": "A new table, empty on arrival. Its id is the MenuItem id, so there is nothing to key off and nothing to migrate."
+    }
+  ],
+  "notes": "No rename, no type change, no drop and no hidden field. Adding @indexed to the new Order.customerUserId is a fresh attribute rather than an index over existing data, so there is no INDEX_REBUILDING window on a column anything already reads."
 }

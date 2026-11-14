@@ -1,6 +1,6 @@
 {
   "signIn": "optional",
-  "signUp": "invited",
+  "signUp": "open",
   "entry": "/",
   "callerAuth": "none"
 }

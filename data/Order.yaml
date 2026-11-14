@@ -5,6 +5,11 @@
 # Four active (received, preparing, ready), three done, one awaiting payment, one older than the
 # twelve-month retention window with its personal details already cleared. `items` is the snapshot
 # the order was placed with, not a reference into MenuItem.
+#
+# NO `customerUserId` IS WRITTEN HERE, and its absence is the guest case every one of these rows is
+# in. The two that belong to the seeded customer account are linked by scripts/seed.js instead,
+# because that id is a hash of the address (lib/identity.js userIdFor) and a hand-copied hash in a
+# YAML file is a copy of a derivation that would silently stop matching the day the derivation moved.
 database: data
 table: Order
 records:

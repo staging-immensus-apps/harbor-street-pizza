@@ -17,7 +17,7 @@ delete process.env.STRIPE_SECRET_KEY
 
 const { checker } = await import('./probe/harness.js')
 const { tables, resetTables } = await import('./probe/harperdb-stub.js')
-const { call, transcript, responseRulesVerdict } = await import('./probe/resource-call.js')
+const { call, userWithCookie, transcript, responseRulesVerdict } = await import('./probe/resource-call.js')
 const { CheckoutApi } = await import('../resources/CheckoutApi.js')
 const { STORE_ID } = await import('../lib/shop.js')
 
@@ -214,6 +214,60 @@ section('a Stripe failure leaves the order pending_payment with a 502/503, never
     globalThis.fetch = originalFetch
   }
   delete process.env.STRIPE_SECRET_KEY
+}
+
+section('customerUserId is stamped from the session, never the body (pay-at-store path)')
+{
+  const before = tables.Order.rows.size
+  const guest = await call(CheckoutApi, 'POST', 'order', { body: { lines: [{ menuItemId: 'pizza-1', quantity: 1 }], fulfilment: 'pickup', customerName: 'Guest', customerPhone: '07000000000' } })
+  check('guest order (no cookie) → 201', guest.status === 201)
+  check('…and the stored row\'s customerUserId is null', tables.Order.rows.get(guest.json?.order?.id)?.customerUserId === null)
+
+  const customer = await userWithCookie('customer@example.test')
+  const signedIn = await call(CheckoutApi, 'POST', 'order', { body: { lines: [{ menuItemId: 'pizza-1', quantity: 1 }], fulfilment: 'pickup', customerName: 'Sam', customerPhone: '07000000001' }, cookie: customer.cookie })
+  check('a signed-in customer\'s order → 201', signedIn.status === 201)
+  check('…and the stored row\'s customerUserId equals the session\'s user id', tables.Order.rows.get(signedIn.json?.order?.id)?.customerUserId === customer.user.id)
+
+  const guestForged = await call(CheckoutApi, 'POST', 'order', { body: { lines: [{ menuItemId: 'pizza-1', quantity: 1 }], fulfilment: 'pickup', customerName: 'Forger', customerPhone: '07000000002', customerUserId: 'someone-elses-id' } })
+  check('a GUEST body naming customerUserId is ignored: stored null (NEG)', guestForged.status === 201 && tables.Order.rows.get(guestForged.json?.order?.id)?.customerUserId === null)
+
+  const other = await userWithCookie('other@example.test')
+  const customerForged = await call(CheckoutApi, 'POST', 'order', { body: { lines: [{ menuItemId: 'pizza-1', quantity: 1 }], fulfilment: 'pickup', customerName: 'Forger2', customerPhone: '07000000003', customerUserId: other.user.id }, cookie: customer.cookie })
+  check('a SIGNED-IN body naming another user\'s id is ignored: stored as the SESSION\'s id (NEG)', customerForged.status === 201 && tables.Order.rows.get(customerForged.json?.order?.id)?.customerUserId === customer.user.id)
+
+  const deactivated = await userWithCookie('gone@example.test', { deactivatedAt: '2026-01-01T00:00:00.000Z' })
+  const deactivatedOrder = await call(CheckoutApi, 'POST', 'order', { body: { lines: [{ menuItemId: 'pizza-1', quantity: 1 }], fulfilment: 'pickup', customerName: 'Ghost', customerPhone: '07000000004' }, cookie: deactivated.cookie })
+  check('a DEACTIVATED user\'s cookie still places the order (checkout never refuses a customer)…', deactivatedOrder.status === 201)
+  check('…but as a guest: stored customerUserId is null (NEG — optionalCaller\'s re-read)', tables.Order.rows.get(deactivatedOrder.json?.order?.id)?.customerUserId === null)
+
+  check('exactly five new rows were written in this section', tables.Order.rows.size === before + 5)
+}
+
+section('customerUserId is stamped the same way on the Stripe pending-payment path')
+{
+  process.env.STRIPE_SECRET_KEY = 'sk_test_fake_key_not_real'
+  const originalFetch = globalThis.fetch
+  let counter = 0
+  globalThis.fetch = async () => {
+    counter++
+    return new Response(JSON.stringify({ id: `cs_test_${counter}`, url: `https://checkout.stripe.com/${counter}`, livemode: false }), { status: 200 })
+  }
+  try {
+    const guest = await call(CheckoutApi, 'POST', 'order', { body: { lines: [{ menuItemId: 'pizza-1', quantity: 1 }], fulfilment: 'pickup', customerName: 'Guest2', customerPhone: '07000000005' } })
+    check('guest order on the Stripe path → 201', guest.status === 201)
+    check('…and the stored row\'s customerUserId is null', tables.Order.rows.get(guest.json?.order?.id)?.customerUserId === null)
+
+    const customer = await userWithCookie('customer2@example.test')
+    const signedIn = await call(CheckoutApi, 'POST', 'order', { body: { lines: [{ menuItemId: 'pizza-1', quantity: 1 }], fulfilment: 'pickup', customerName: 'Sam2', customerPhone: '07000000006' }, cookie: customer.cookie })
+    check('a signed-in customer\'s order on the Stripe path → 201', signedIn.status === 201)
+    check('…and the stored row\'s customerUserId equals the session\'s user id', tables.Order.rows.get(signedIn.json?.order?.id)?.customerUserId === customer.user.id)
+
+    const forgedBody = await call(CheckoutApi, 'POST', 'order', { body: { lines: [{ menuItemId: 'pizza-1', quantity: 1 }], fulfilment: 'pickup', customerName: 'Forger3', customerPhone: '07000000007', customerUserId: 'nonsense' }, cookie: customer.cookie })
+    check('a forged customerUserId on the Stripe path still stores the SESSION\'s id (NEG)', forgedBody.status === 201 && tables.Order.rows.get(forgedBody.json?.order?.id)?.customerUserId === customer.user.id)
+  } finally {
+    globalThis.fetch = originalFetch
+    delete process.env.STRIPE_SECRET_KEY
+  }
 }
 
 section('anonymous callers get 200/201 throughout — this resource is public')

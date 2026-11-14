@@ -5,7 +5,9 @@
 //   GET    /MenuAdminApi/:id         one item, or 404
 //   POST   /MenuAdminApi/            { name, description?, priceCents, category?, available?, sortOrder? } → 201 { item }
 //   POST   /MenuAdminApi/update      { id, ...partial fields } → { item } — THE update route.
-//   POST   /MenuAdminApi/delete      { id } → { ok: true } — THE delete route.
+//   POST   /MenuAdminApi/delete      { id } → { ok: true, photoDeleted: true } — THE delete route.
+//                                    Also removes the item's MenuItemPhoto row (same id), so
+//                                    deleting an item never leaves orphan photo bytes behind.
 //
 // The id travels in the body and the path names an action — RESOLVED, and it was never the route
 // shape. `MenuItem.createdAt` and `MenuItem.updatedAt` are `@createdTime` / `@updatedTime`
@@ -146,11 +148,21 @@ async function updateItem (id, body) {
   return json({ item: adminMenuItem(stored) })
 }
 
-/** Shared by the `delete` action route and the DELETE verb alias. */
+/**
+ * Shared by the `delete` action route and the DELETE verb alias. Also removes the item's photo
+ * (MenuItemPhoto, keyed by the same id) so no orphan bytes are left behind once the item is gone.
+ *
+ * The two deletes are NOT one transaction, so the order is chosen to leave the recoverable state
+ * on a partial failure: the photo goes first. An item with no photo renders fine; a photo with no
+ * item is bytes nothing can ever reach or clean up again. The photo delete is unconditional —
+ * deleting a key that is not there is not an error, and a get() first would be a read to decide
+ * something about to happen anyway.
+ */
 async function deleteItem (id) {
   if (!id) return json({ error: 'not found' }, 404)
   const existing = await db.MenuItem.get(id)
   if (!existing) return json({ error: 'not found' }, 404)
+  await db.MenuItemPhoto.delete(id)
   await db.MenuItem.delete(id)
-  return json({ ok: true })
+  return json({ ok: true, photoDeleted: true })
 }

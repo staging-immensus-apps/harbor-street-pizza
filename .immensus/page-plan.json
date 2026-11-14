@@ -2,58 +2,92 @@
   "routes": [
     {
       "path": "/",
-      "title": "Menu",
-      "stories": [],
+      "page": "Home",
+      "stories": [
+        "public-menu-shows-photo"
+      ],
       "calls": [
         "GET /MenuApi",
-        "GET /StoreInfoApi"
+        "GET /StoreInfoApi",
+        "GET /AuthApi/me"
       ],
-      "notes": "Unchanged. The menu by category with a running basket; the paused message replaces the basket when ordering is off."
+      "notes": "The menu by category with a running basket. An item whose photoUrl is present shows the photo beside its name and price, lazily loaded, with a fixed-size frame so the list does not jump; an item with no photoUrl renders exactly as today — no placeholder, no broken image, no request. The header shows 'Sign in' when nobody is signed in and the customer's name linking to /my-orders when somebody is."
     },
     {
       "path": "/basket",
-      "title": "Basket",
+      "page": "Basket",
       "stories": [],
       "calls": [
-        "GET /StoreInfoApi",
-        "POST /CheckoutApi/quote"
+        "GET /StoreInfoApi"
       ],
-      "notes": "Unchanged."
+      "notes": "Quantities, removals, running total. Unchanged."
     },
     {
       "path": "/checkout",
-      "title": "Checkout",
-      "stories": [],
+      "page": "Checkout",
+      "stories": [
+        "customer-order-linked-to-account"
+      ],
       "calls": [
         "GET /StoreInfoApi",
+        "GET /AuthApi/me",
+        "GET /CustomerOrderApi",
         "POST /CheckoutApi/quote",
         "POST /CheckoutApi/order"
       ],
-      "notes": "Unchanged."
+      "notes": "Pickup or delivery; name and phone always, address and postcode for delivery. Guest checkout is unchanged and is still the default for anyone not signed in. When signed in, the page prefills name, phone and delivery address from the customer's most recent order (the first row of GET /CustomerOrderApi) and falls back to the account name; every field stays editable and whatever is submitted is what the order stores. The page never sends a user id — the server takes it from the session."
     },
     {
-      "path": "/order/:code",
-      "title": "Order confirmation",
+      "path": "/order/*",
+      "page": "OrderConfirmation",
       "stories": [],
       "calls": [
         "GET /OrderConfirmationApi/:code"
       ],
-      "notes": "Unchanged. The only wildcard route, so routes/spa.js keeps /order/* and /order answers too (rule 26). The 'Estimated ready' wording is deliberately left as it is this pass."
+      "notes": "Confirmation by the order's own code. Identical for a guest order and a signed-in customer's order."
+    },
+    {
+      "path": "/sign-in",
+      "page": "CustomerSignIn",
+      "stories": [
+        "customer-create-account"
+      ],
+      "calls": [
+        "GET /AuthApi/config",
+        "GET /AuthApi/me",
+        "POST /AuthApi/register",
+        "POST /AuthApi/password",
+        "POST /AuthApi/request-link"
+      ],
+      "notes": "The customer's own sign-in page, with two tabs: 'Create an account' (email, password, name optional) and 'Sign in' (email, password). Either one lands them back where they came from — /checkout when they arrived from the basket, otherwise /my-orders. Below both: 'Forgotten your password? Email me a link', which calls request-link with next=/my-orders; the emailed link signs them in and the page they land on offers 'Set a new password'. Shows the server's refusal text plainly — an address already registered, a password that is too short, email not configured, or a refusal from the account limit — rather than a generic failure."
+    },
+    {
+      "path": "/my-orders",
+      "page": "MyOrders",
+      "stories": [
+        "customer-view-past-orders"
+      ],
+      "calls": [
+        "GET /AuthApi/me",
+        "GET /CustomerOrderApi",
+        "PUT /AccountApi/password",
+        "DELETE /AccountApi"
+      ],
+      "notes": "A signed-in customer's own page. Their past orders newest first — order code, date, the items, total and current status, each linking to its confirmation page — and an empty state saying orders placed as a guest before the account existed are not listed. Below the list: set a new password, and delete my account behind a confirmation that says the orders stay in the shop's records with no account attached. Not signed in: a prompt with a link to /sign-in, never a blank page."
     },
     {
       "path": "/manage",
-      "title": "Manage",
+      "page": "ManageHome",
       "admin": true,
       "stories": [],
       "calls": [
-        "GET /AuthApi/me",
         "GET /OrderAdminApi"
       ],
-      "notes": "Unchanged."
+      "notes": "Hub: how many orders are waiting, links to the three screens."
     },
     {
       "path": "/manage/orders",
-      "title": "Order queue",
+      "page": "Orders",
       "admin": true,
       "stories": [],
       "calls": [
@@ -61,34 +95,35 @@
         "GET /OrderAdminApi/:id",
         "POST /OrderAdminApi/status"
       ],
-      "notes": "CHANGED: 'Mark preparing', 'Mark ready' and 'Cancel order' save again once OrderAdminApi stops naming a Harper-owned timestamp in its write. The page's own calls do not change — it already posts to /OrderAdminApi/status. Two things on this screen are deliberately NOT touched this pass: seeded demo orders showing £0.00 per line, and new orders needing a reload to appear."
+      "notes": "The live queue. Unchanged this pass."
     },
     {
       "path": "/manage/menu",
-      "title": "Menu editor",
+      "page": "MenuEditor",
       "admin": true,
       "stories": [
-        "add-menu-item-works",
-        "edit-menu-item-works"
+        "owner-upload-menu-photo"
       ],
       "calls": [
         "GET /MenuAdminApi",
         "POST /MenuAdminApi",
         "POST /MenuAdminApi/update",
-        "POST /MenuAdminApi/delete"
+        "POST /MenuAdminApi/delete",
+        "POST /MenuPhotoAdminApi/:menuItemId",
+        "DELETE /MenuPhotoAdminApi/:menuItemId"
       ],
-      "notes": "CHANGED: adding and editing an item both save again. The page's own calls do not change. One frontend detail follows from the fix: createdAt and updatedAt now come back as epoch-millisecond numbers rather than ISO strings, because Harper assigns them, so anything on this screen that renders them must accept a number as well as a string (src/lib/format.ts) — and existing rows written before the fix may still hold a string, so both shapes must render."
+      "notes": "Add, edit, hide and remove items; change prices. New: each item's add/edit dialog has a photo control — current photo with Replace and Remove, or 'Choose a photo' when there is none. The chosen file is drawn to a canvas in the browser and re-encoded as JPEG no wider than 1200px before upload, so a phone photo arrives small and the menu stays quick; the 5 MB cap is the server's guard on what is left. The item is saved first, then the photo is uploaded against its id, and a photo failure is reported without losing the saved item. Saving with no photo chosen leaves the item with none."
     },
     {
       "path": "/manage/settings",
-      "title": "Shop settings",
+      "page": "Settings",
       "admin": true,
       "stories": [],
       "calls": [
         "GET /StoreSettingsApi",
         "PUT /StoreSettingsApi"
       ],
-      "notes": "Unchanged — this screen already saves correctly and must still save correctly after the fix."
+      "notes": "Pause ordering, pickup/delivery switches, delivery fee, postcode list, time estimates, last-cleared date. Unchanged."
     }
   ]
 }

@@ -78,6 +78,9 @@
     "StoreSettingsApi-probe": "node scripts/StoreSettingsApi-probe.js",
     "CheckoutApi-probe": "node scripts/CheckoutApi-probe.js",
     "OrderConfirmationApi-probe": "node scripts/OrderConfirmationApi-probe.js",
-    "OrderAdminApi-probe": "node scripts/OrderAdminApi-probe.js"
+    "OrderAdminApi-probe": "node scripts/OrderAdminApi-probe.js",
+    "MenuPhotoApi-probe": "node scripts/MenuPhotoApi-probe.js",
+    "CustomerOrderApi-probe": "node scripts/CustomerOrderApi-probe.js",
+    "MenuPhotoAdminApi-probe": "node scripts/MenuPhotoAdminApi-probe.js"
   }
 }

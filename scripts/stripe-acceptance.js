@@ -122,14 +122,31 @@ function recorder (reply) {
   return impl
 }
 
-/** Capture console.error / console.warn for the duration of `fn`. */
+/**
+ * Capture everything written while `fn` runs, through EITHER channel.
+ *
+ * `lib/stripe.js` writes through `globalThis.logger` now, because Harper does not put console
+ * output in an app's log where an operator can read it — and a refusal that logs nothing is the
+ * defect the assertions below exist to catch, so capturing only `console` would have asserted
+ * silence while the code was writing to the other channel. Both go into one transcript. There is no
+ * `globalThis.logger` outside Harper, so one is installed for the duration and removed after.
+ */
 async function capturingConsole (fn) {
   const lines = []
   const realError = console.error
   const realWarn = console.warn
-  console.error = (...a) => lines.push(a.map(String).join(' '))
-  console.warn = (...a) => lines.push(a.map(String).join(' '))
-  try { return { value: await fn(), lines } } finally { console.error = realError; console.warn = realWarn }
+  const realLogger = globalThis.logger
+  const record = (...a) => lines.push(a.map(String).join(' '))
+  console.error = record
+  console.warn = record
+  globalThis.logger = { ...(realLogger ?? {}), trace: record, debug: record, info: record, warn: record, error: record, fatal: record, notify: record }
+  try {
+    return { value: await fn(), lines }
+  } finally {
+    console.error = realError
+    console.warn = realWarn
+    globalThis.logger = realLogger
+  }
 }
 
 // ---------------------------------------------------------------- negative controls first

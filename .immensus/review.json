@@ -1,21 +1,28 @@
 {
   "verdict": "approve",
+  "designFidelity": "matches",
+  "summary": "Owner rules hold on every resource this build touched: CustomerOrderApi filters Order on customerUserId from the session with no admin branch, no ?owner= channel and no sub-path read; CheckoutApi stamps customerUserId from lib/context.js optionalCaller (which applies every check loadCaller applies and answers null instead of throwing) and never from the body; MenuPhotoAdminApi and MenuAdminApi are requireAdmin on every verb; MenuApi/MenuPhotoApi are public as the plan declares. Every refusal is a thrown 403 with no WWW-Authenticate — no 401 anywhere. Blob writes use new Blob([buf],{type}) with verify-on-write and delete-on-mismatch (rule 8), every restate of a stored MenuItem/Order row goes through withoutManaged() (CLAUDE.md §8), customerUserId is @indexed, class names differ from table names, no tables/databases import outside lib/db.js, no new dependency, and the only outbound hosts remain api.resend.com and api.stripe.com. Opening signUp to 'open' does not move the owner's seat: register always writes role member, refuses OWNER_EMAIL outright, and promotion still happens only through ownerTakesSeat on a proven address. run_check lint is green. Three findings, none of them a hole an outsider can walk through.",
   "findings": [
     {
-      "file": "deploy/smoke.txt",
-      "line": 4,
+      "file": "resources/AccountApi.js",
+      "line": 108,
       "rule": "convention",
       "severity": "major",
-      "message": "This pass edited deploy/smoke.txt, which is outside the build's writable areas, and deleted two post-deploy smoke rows — `GET /MenuApi 200` and `GET /StoreInfoApi 200` — for the two public read endpoints this pass did not otherwise touch. Nothing in the diff changes MenuApi or StoreInfoApi, so there is no stated reason for the rows to go, and their removal is a quiet reduction of the only per-deploy proof that the customer-facing menu and shop-info endpoints answer at all (rule 12's smoke table). The trailing-slash normalisation on the three 403 rows is harmless; the two deletions should be restored unless there is a measured reason they cannot pass."
+      "message": "PUT /AccountApi/password verifies `currentPassword` with a bare verifyPassword() call — no fixed-window counter on the row, and a distinct refusal code (403 `wrong_password`) rather than the generic one. CLAUDE.md rule 25 is explicit that every credential check sits behind a counter on the row it checks and refuses with the same generic 403. AuthApi/password next door does exactly that (checkPasswordAttempt on passwordAttemptTimestamps); this new route is the one credential check in the app with no cap, so a holder of a stolen or borrowed session can brute-force the account's current password at will and turn cookie access into permanent takeover, and each attempt burns a synchronous 100k-round PBKDF2 on the worker thread. Reuse checkPasswordAttempt (or the same window) here and return the generic refusal. Not a blocker: the caller must already hold a valid session for the very account being attacked, so nothing is reachable from outside."
     },
     {
-      "file": "package.json",
-      "line": 74,
-      "rule": "convention",
+      "file": "resources/AccountApi.js",
+      "line": 83,
+      "rule": "design",
       "severity": "minor",
-      "message": "`managed-fields-probe` was registered in package.json by hand. The template's rule for a new probe is to write only `scripts/<name>-probe.js` and leave package.json alone, because the registration entry is written in code after this stage (CLAUDE.md §7.30, issue #136). The probe file itself is correct — `freezeClock()`, `process.exit(done())`, synthesized negative controls, and it reads `ROOT`/`checker` from a harness that does export both — so this is only the registration step done twice."
+      "message": "Account deletion unlinks at most UNLINK_LIMIT (1000) orders and then deletes the User row unconditionally, so for a customer over that limit the remaining orders keep a customerUserId pointing at a user that no longer exists — a residual identifier derived from the deleted address (userIdFor), surviving the deletion the page promised. The comment above UNLINK_LIMIT says such a customer 'deletes their account in two passes', but the code gives them no second pass: the row is gone after the first. Either delete the User row only when the sweep came back short of the limit, or loop until no rows match."
+    },
+    {
+      "file": "scripts/seed.js",
+      "line": 73,
+      "rule": "secret",
+      "severity": "minor",
+      "message": "A literal password, 'pizza-preview-demo', is now committed and written as the passwordHash of two seeded accounts — reversing this file's own stated rule that 'a seeded credential would be a credential in the repository'. It is not an API key and the blast radius is small (two example.com rows, role member, reachable only through this script, which the platform runs against the preview), which is why this is minor rather than a blocker. Worth making SEED_CUSTOMER_PASSWORD required rather than defaulted, or deriving a random one per run and printing it, so no working credential ships in the tree."
     }
-  ],
-  "designFidelity": "matches",
-  "summary": "The build fixes the long-unexplained 400 by keeping Harper-assigned @createdTime/@updatedTime fields out of every record this app writes. Auth scope is untouched and correct: MenuAdminApi and OrderAdminApi still open every method — including `connect`/`subscribe` — with `requireAdmin()` before any db access, `static loadAsInstance = false` and `target.checkPermission = false` are in place, refusals remain the thrown 403 from runAuthed() with no 401 anywhere, and the public resources (MenuApi, StoreInfoApi, CheckoutApi, OrderConfirmationApi) are unchanged and match their plan rules. The writes still restate only server-derived fields, so a forged id, code, total, paymentStatus or customer field in a body changes nothing. No secrets, no new fetch host (lib/stripe-events.js and lib/retention.js only gained `withoutManaged`), no new dependency, no injection-shaped copy, no seed-data change, and schema.graphql gained comments only. Idempotency is preserved or improved: the webhook paths in lib/stripe-events.js now drop `updatedAt` off their spreads, which removes a refusal that would have answered Stripe 500 and left a paid order out of the queue. `lib/managed-fields.js` holds no state and the new managed-fields-probe parses every schema*.graphql so the hand-transcribed map cannot drift silently. Two process findings only: an out-of-area edit to deploy/smoke.txt that deletes two public-endpoint smoke rows, and a hand-written probe registration in package.json. Both are liveable and neither is an auth, secret or data hole."
+  ]
 }

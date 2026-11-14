@@ -1,10 +1,12 @@
 {
-  "/": ["browse-menu"],
+  "/": ["browse-menu", "public-menu-shows-photo"],
   "/basket": [],
-  "/checkout": ["choose-pickup-or-delivery", "pay-online"],
-  "/order/:code": ["order-confirmation"],
+  "/checkout": ["choose-pickup-or-delivery", "pay-online", "customer-order-linked-to-account"],
+  "/order/*": ["order-confirmation"],
+  "/sign-in": ["customer-create-account"],
+  "/my-orders": ["customer-view-past-orders"],
   "/manage": [],
   "/manage/orders": ["view-new-orders", "update-order-status"],
-  "/manage/menu": ["update-menu"],
+  "/manage/menu": ["update-menu", "owner-upload-menu-photo"],
   "/manage/settings": []
 }

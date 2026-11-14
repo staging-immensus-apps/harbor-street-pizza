@@ -2,32 +2,40 @@
   "tables": [
     {
       "table": "MenuItem",
-      "count": 10,
-      "notes": "Preview only. A few items across two or three categories, at least one unavailable, so the editor has something to add to, edit and hide."
+      "count": 8,
+      "notes": "Pizzas, sides and drinks across three categories, whole-cent prices. Two of them (the two pizzas QA will see first) carry photoUpdatedAt so the photo path has data on first load."
+    },
+    {
+      "table": "MenuItemPhoto",
+      "count": 2,
+      "notes": "Written by scripts/seed.js, not by a YAML file: a Blob seeded from YAML text would store the text rather than an image, so the script generates two small solid-colour PNGs in code and writes them under the matching MenuItem ids with contentType image/png."
     },
     {
       "table": "Order",
-      "count": 4,
-      "notes": "Preview only. Orders spread across the pending_payment, active and done queues, so every status button on /manage/orders has a row to act on. Each line carries its own name, priceCents and quantity."
+      "count": 6,
+      "notes": "A spread across the three queues and both fulfilment kinds. Every line carries {menuItemId, name, priceCents, quantity} so the owner's queue shows a real per-line price. Two of the six carry customerUserId set to the deterministic id of customer1@example.com, so the past-orders page has data; the rest leave it null as guest orders, and one of those belongs to customer2's address as a guest order that must NOT appear in customer1's list."
     },
     {
       "table": "StoreSetting",
       "count": 1,
-      "notes": "Preview only. The single id 'store' row: ordering on, pickup and delivery on, a fee, a short postcode list and both estimates."
+      "notes": "The single id 'store' row: open for orders, pickup and delivery on, a fee, a short postcode list, both estimates."
     }
   ],
   "accounts": [
     {
       "role": "admin",
-      "email": "owner@example.com"
+      "email": "owner@example.com",
+      "notes": "The shop owner. Signs in with the emailed link, or with the admin password in the preview."
     },
     {
       "role": "member",
-      "email": "member-one@example.com"
+      "email": "customer1@example.com",
+      "notes": "A customer account with a password set, and two seeded orders linked to it."
     },
     {
       "role": "member",
-      "email": "member-two@example.com"
+      "email": "customer2@example.com",
+      "notes": "A second customer account with a password set and no linked orders — the one QA uses to prove one customer cannot see another's orders, and that the owner screens refuse a customer."
     }
   ]
 }

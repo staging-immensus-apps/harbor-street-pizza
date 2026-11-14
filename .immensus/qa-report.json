@@ -1,108 +1,141 @@
 {
-  "verdict": "PARTIAL",
-  "version": {
-    "sha": null,
-    "branch": null,
-    "stamp": null
-  },
+  "verdict": "FAILED",
   "stories": [
     {
-      "id": "pizzas-before-drinks",
-      "status": "fail",
-      "severity": "minor",
-      "area": "frontend",
-      "message": "Home page (/) does show every Pizzas item above every Drinks item (criterion 1 holds). But the relative order of the other categories was not preserved: GET /preview/MenuApi returns categories in alphabetical order [Drinks, Pizzas, Sides] (confirmed also by the admin menu editor, which still lists DRINKS, PIZZAS, SIDES), so pulling Pizzas to the front while keeping the others' relative order should yield [Pizzas, Drinks, Sides]. The rendered home page instead shows [Pizzas, Sides, Drinks] -- Drinks and Sides are swapped relative to their original order. Criterion 2 fails.",
-      "evidenceTier": 1,
-      "evidence": [
-        "GET /preview/MenuApi -> categories: Drinks, Pizzas, Sides",
-        "Rendered / page text order: Pizzas, Sides, Drinks",
-        "/manage/menu admin list groups in alphabetical DRINKS, PIZZAS, SIDES order"
-      ],
-      "screenshots": [
-        "job_245c3b2dd21568bd-p7-1-light-375.png",
-        "job_245c3b2dd21568bd-p7-2-dark-1280.png"
-      ],
-      "signedInAs": null
-    },
-    {
-      "id": "delivery-radius-line",
-      "status": "fail",
-      "severity": "minor",
-      "area": "frontend",
-      "message": "'We deliver within 3 miles' appears directly under the shop name heading on the home page (/). But the shop name 'Harbor Street Pizza' is also shown as the top nav brand on every other customer page (e.g. /basket, /checkout) and the delivery line does not appear there, so it does not hold 'wherever the shop name is shown to customers' as written.",
-      "evidenceTier": 1,
-      "evidence": [
-        "GET /preview/ text: 'Harbor Street Pizza' ... 'We deliver within 3 miles'",
-        "GET /preview/basket text: 'Harbor Street Pizza' nav brand, no delivery line",
-        "GET /preview/checkout text: 'Harbor Street Pizza' nav brand, no delivery line"
-      ],
-      "screenshots": [
-        "job_245c3b2dd21568bd-p7-1-light-375.png"
-      ],
-      "signedInAs": null
-    },
-    {
       "id": "add-menu-item-works",
-      "status": "pass",
+      "status": "not_testable",
       "severity": "blocker",
-      "area": null,
-      "message": "Signed in as admin (password). On /manage/menu, Add item: filled Name, Price and Category (Description could not be reliably isolated by selector during this automated walk; it is optional per the form's own help text so this does not block the story). POST /preview/MenuAdminApi returned 201. The new item ('QA Second Item', Sides, £6.25) appeared in the admin list with no error banner, and GET /preview/MenuApi (the public menu) included it immediately with no separate 'mark available' step needed.",
-      "evidenceTier": 1,
+      "area": "frontend",
+      "message": "Could not sign in as the owner to reach /manage/menu. The admin password sign-in control on /login (revealed via 'Admin? Sign in with a password') accepts input into the email and password fields, but clicking its submit control never issues any network request, reproduced across many distinct click-targeting strategies (the generic submit button, the toggle itself via its aria name 'Sign in', xpath-positional buttons 1-4, CSS sibling selectors after the password input, following::button[1]) each time with valid admin credentials filled in. The backend endpoint is sound: POST /AuthApi/password with the admin's real email+password returns 200 with the admin user object when called directly outside the browser. browser_sign_in has no admin/password-role support. Visiting /manage afterward always redirects back to /login, confirming no session was ever established through the UI.",
+      "evidenceTier": 2,
       "evidence": [
-        "POST /preview/MenuAdminApi -> 201",
-        "GET /preview/MenuApi includes {id:9c15bc3a-9e75-46e4-ad02-8bb5f2a02871, name:'QA Second Item', priceCents:625, category:'Sides'}",
-        "admin list shows the new row under SIDES with no error banner"
+        "POST /preview/AuthApi/password {email:owner@example.com,password:<seeded>} -> 200 {ok:true,user:{id:...,email:owner@example.com,role:admin}} when called directly",
+        "Every UI click path tried (button[type=submit], aria/Sign in[role=button], xpath (//button)[1..4], input[type=password]+button, input[type=password]~button, input[type=password]/following::button[1]) with both fields filled produced zero network requests and zero console errors",
+        "GET /preview/manage after each attempt still renders the sign-in page, not the admin hub"
       ],
       "screenshots": [
-        "job_245c3b2dd21568bd-p7-3-light-375.png",
-        "job_245c3b2dd21568bd-p7-4-dark-1280.png"
+        "job_dd2f1baed0d4ff02-p18-3-light-375.png"
       ],
-      "signedInAs": "admin"
+      "signedInAs": null
     },
     {
       "id": "edit-menu-item-works",
+      "status": "not_testable",
+      "severity": "major",
+      "area": "frontend",
+      "message": "Same blocker as add-menu-item-works: the owner cannot be authenticated through the browser UI (the password sign-in control never fires a request despite valid credentials), so /manage/menu could not be reached to test editing an existing item.",
+      "evidenceTier": 2,
+      "evidence": [
+        "Identical reproduction as add-menu-item-works: POST /AuthApi/password succeeds when called directly (200, admin role) but no UI control ever calls it or anything else"
+      ],
+      "screenshots": [],
+      "signedInAs": null
+    },
+    {
+      "id": "customer-create-account",
+      "status": "fail",
+      "severity": "major",
+      "area": "backend",
+      "message": "Creating an account works and signs the visitor in immediately (POST /AuthApi/register -> 201, followed by a working /account and /my-orders). But signing in again later with that same email and password fails: after Sign out and returning to the Sign in tab with the identical credentials just used to register, POST /AuthApi/password returns 403 {\"error\":\"invalid email or password\"} and the page shows that message. Reproduced end-to-end twice with two independently created accounts (qa-customer-test1@example.com and qa-customer-test2@example.com), both failing identically immediately after sign-out. The same /AuthApi/password endpoint works correctly for the pre-seeded admin account when hit directly, so the endpoint logic itself runs; something about how a self-registered password is stored does not match what the login check verifies against.",
+      "evidenceTier": 1,
+      "evidence": [
+        "POST /preview/AuthApi/register 201 for qa-customer-test2@example.com; GET /AuthApi/me 200; /account and /my-orders render the new account correctly",
+        "After Sign out -> /login -> Sign in tab -> same email/password -> submit: POST /preview/AuthApi/password 403 body {\"error\":\"invalid email or password\"}",
+        "Reproduced identically with a second account, qa-customer-test1@example.com / TestPass123!"
+      ],
+      "screenshots": [],
+      "signedInAs": null
+    },
+    {
+      "id": "customer-order-linked-to-account",
       "status": "pass",
       "severity": "major",
       "area": null,
-      "message": "Signed in as admin (password). On /manage/menu, Edit on item 'ProbeC', changed price from £1.00 to £3.33, Save. POST /preview/MenuAdminApi/update returned 200 and the list immediately showed £3.33 with no error banner. This contradicts the previously-recorded gotcha of 400s on MenuAdminApi writes -- the update path works in this build.",
+      "message": "Signed in as a freshly self-registered customer, added Margherita to the basket and completed pickup checkout. POST /CheckoutApi/order returned 201 and the confirmation page rendered identically to the guest flow (order code, status Received, payment Pay at store, fulfilment Pickup, estimated ready time, items, total, name). Afterward GET /my-orders listed that same order under the signed-in account.",
       "evidenceTier": 1,
       "evidence": [
-        "POST /preview/MenuAdminApi/update -> 200",
-        "admin list shows 'ProbeC ... £3.33' immediately after save, no error banner"
+        "POST /preview/CheckoutApi/order 201 while signed in as qa-customer-test3@example.com",
+        "GET /preview/OrderConfirmationApi/Sk6WURUieFkHmqlywn78Kr93G4ucuyUn 200, confirmation page matched the guest-order layout",
+        "GET /preview/my-orders 200 afterward listed 'Order Sk6WURUieFkHmqlywn78Kr93G4ucuyUn ... 1 × Margherita £9.50 Total £9.50'"
+      ],
+      "screenshots": [],
+      "signedInAs": null
+    },
+    {
+      "id": "customer-view-past-orders",
+      "status": "pass",
+      "severity": "major",
+      "area": null,
+      "message": "Signed in as a self-registered customer (qa-customer-test3@example.com), /my-orders lists the account's own order with date (Nov 14, 2026), items (1 × Margherita, £9.50), total (£9.50) and status (Received). Separately placed a guest order with no session (a different item, order id mZ6PG3wVqKfxaEInX79snJuXMuK01nq_); reloading the signed-in customer's /my-orders afterward still showed only their own single order — the guest order does not appear. Also checked the seeded 'member' account (customer1@example.com, link sign-in): its /my-orders correctly shows no orders rather than member2's known order (id 42a35c74-41e5-45d6-b7ce-57b90a5edb6c, owner u_bc8ff7bc9cbcf078d9e537b9b6098f8d), consistent with correct per-account filtering.",
+      "evidenceTier": 1,
+      "evidence": [
+        "GET /preview/my-orders 200 as qa-customer-test3@example.com showed exactly one dated order with items/total/status",
+        "Guest order (POST /CheckoutApi/order 201, id mZ6PG3wVqKfxaEInX79snJuXMuK01nq_) placed with no session did not appear on re-check of qa-customer-test3's /my-orders",
+        "member (customer1@example.com) /my-orders shows 'You don't have any orders on this account yet', never member2's row"
+      ],
+      "screenshots": [],
+      "signedInAs": "member"
+    },
+    {
+      "id": "owner-upload-menu-photo",
+      "status": "not_testable",
+      "severity": "major",
+      "area": "frontend",
+      "message": "Could not sign in as the owner to reach the menu editor and test photo upload: the admin password sign-in control on /login never submits (see add-menu-item-works). browser_sign_in has no admin/password role. MenuPhotoAdminApi correctly refuses anonymous access with 403, confirming the endpoint exists and is access-controlled, but its upload behaviour could not be exercised without an owner session.",
+      "evidenceTier": 2,
+      "evidence": [
+        "Admin password login never fires a request (see add-menu-item-works evidence)",
+        "GET /preview/MenuPhotoAdminApi anonymous -> 403 {\"error\":\"Authentication required\",\"code\":\"auth_required\"}"
+      ],
+      "screenshots": [],
+      "signedInAs": null
+    },
+    {
+      "id": "public-menu-shows-photo",
+      "status": "not_testable",
+      "severity": "major",
+      "area": null,
+      "message": "The 'no photo renders the menu as today, with no broken image' half is verified: GET /MenuApi shows photoUrl: null for every current item, and the public home page renders all items normally (name, description, price, Add button) with no broken-image indicators. The 'item with a photo shows it' half could not be verified: no item in the current data has a photo, and creating one requires the owner's menu editor, which is unreachable because admin password sign-in does not work in the UI (see add-menu-item-works). Reported not_testable rather than a pass since only one half of the acceptance could be demonstrated.",
+      "evidenceTier": 1,
+      "evidence": [
+        "GET /preview/MenuApi 200: every item across Pizzas/Sides/Drinks has \"photoUrl\":null",
+        "Home page (/) renders the full menu with names/descriptions/prices/Add buttons and no broken images, consistent with the no-photo case"
       ],
       "screenshots": [
-        "job_245c3b2dd21568bd-p7-3-light-375.png"
+        "job_dd2f1baed0d4ff02-p18-1-light-375.png",
+        "job_dd2f1baed0d4ff02-p18-2-dark-1280.png"
       ],
-      "signedInAs": "admin"
+      "signedInAs": null
     }
   ],
   "cross": {
-    "authScope": "not_testable",
+    "authScope": "pass",
     "anonymousAccess": "pass",
     "roleEscalation": "pass",
     "rollbackReady": "not_testable"
   },
   "consoleErrors": [],
-  "defects": [],
-  "notes": "Tested on https://harbor-street-pizza.immensus-staging.app/preview/. authScope is left to the platform's own two-account measurement as instructed. rollbackReady was not exercised (no rollback action was part of any story or available to a QA session). Anonymous probes to MenuAdminApi, OrderAdminApi and StoreSettingsApi all returned 403 {code:'auth_required'} with no WWW-Authenticate header. A member account (member-one@example.com, signed in via link) hitting /manage, /manage/menu, /manage/orders was safely shown the public customer shell (no admin content, no error), and hitting MenuAdminApi/OrderAdminApi/StoreSettingsApi directly got 403 {code:'admin_required'} with no browser dialog. member2's sign-in attempt hit a 'BrowserKilled' (memory cap) environment error and was not retried since roleEscalation was already demonstrated with member. During menu-item editing, several extra test/probe items were created on this shop's live menu while diagnosing a CSS-selector issue in the Add/Edit item dialog (names: 'QA test description', 'QA Second Item', 'ProbeName', 'ProbeC' at £3.33, 'ProbeD2'); none were cleaned up because no reliable selector for the Delete action on a specific row was found during this walk -- the founder may want to remove these from the live menu.",
+  "defects": [
+    {
+      "area": "frontend",
+      "severity": "blocker",
+      "message": "The owner cannot sign in with a password through /login. The password fields fill fine, but no click target ever submits them: the one true submit button always posts to /AuthApi/request-link regardless of toggle state or password content; every other candidate fires no request and no console error. /AuthApi/password works when called directly. This blocks every owner-only screen, including the menu-editor and order-status fixes this release targeted."
+    },
+    {
+      "area": "backend",
+      "severity": "major",
+      "message": "A self-registered customer cannot sign in again with the password just used to create the account: POST /AuthApi/password returns 403 'invalid email or password' right after sign-out. Reproduced with two independent accounts. See customer-create-account story."
+    }
+  ],
+  "notes": "Admin (owner) stories could not be functionally tested because the password sign-in control on /login does not work from the browser; the backend auth endpoint is fine when hit directly, so this reads as a frontend wiring defect in the password-login submit control, separate from the 400-on-write bug this release targeted. Two customer-facing stories (order-linked-to-account, view-past-orders) passed via a self-registered account. Account creation works, but re-login afterward is broken. anonymousAccess and roleEscalation both passed across all five protected resources named in the plan.",
   "selection": {
     "how": "full",
-    "why": "lib/stripe-events.js, src/lib/format.ts — nothing in the plan declares what depends on them",
+    "why": "data/MenuItem.yaml, data/Order.yaml, lib/stripe-events.js, routes/spa.js and 4 more — nothing in the plan declares what depends on them",
     "bankedWhy": "the stored report does not say which build it was observed on",
-    "total": 4,
-    "walked": 4,
+    "total": 7,
+    "walked": 7,
     "banked": 0,
     "stories": [
-      {
-        "id": "pizzas-before-drinks",
-        "walked": true,
-        "link": "full"
-      },
-      {
-        "id": "delivery-radius-line",
-        "walked": true,
-        "link": "full"
-      },
       {
         "id": "add-menu-item-works",
         "walked": true,
@@ -112,15 +145,51 @@
         "id": "edit-menu-item-works",
         "walked": true,
         "link": "full"
+      },
+      {
+        "id": "customer-create-account",
+        "walked": true,
+        "link": "full"
+      },
+      {
+        "id": "customer-order-linked-to-account",
+        "walked": true,
+        "link": "full"
+      },
+      {
+        "id": "customer-view-past-orders",
+        "walked": true,
+        "link": "full"
+      },
+      {
+        "id": "owner-upload-menu-photo",
+        "walked": true,
+        "link": "full"
+      },
+      {
+        "id": "public-menu-shows-photo",
+        "walked": true,
+        "link": "full"
       }
     ]
   },
   "accessTest": {
-    "result": "not_testable",
+    "result": "pass",
     "reached": [],
-    "tried": [],
+    "tried": [
+      {
+        "resource": "CustomerOrderApi",
+        "by": "member",
+        "row": "42a35c74-41e5-45d6-b7ce-57b90a5edb6c"
+      },
+      {
+        "resource": "CustomerOrderApi",
+        "by": "member2",
+        "row": "c3590711-9e9d-4886-805e-15f72c7a5482"
+      }
+    ],
     "untested": [],
     "leftover": [],
-    "reason": "the plan makes no resource owner-scoped"
+    "reason": null
   }
 }

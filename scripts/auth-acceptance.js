@@ -83,11 +83,24 @@ const sessionCookie = (res) => {
   const c = res.cookies.find((c) => c.startsWith(`${COOKIE_NAME}=`))
   return c ? c.split(';')[0] : null
 }
+/**
+ * Everything written while `fn` runs, through EITHER channel.
+ *
+ * `console.log` is what lib/email.js still writes its "would send" line on, and it is where a magic
+ * link token appears in a suite; `globalThis.logger` is what resources/ and lib/ write through now,
+ * because Harper does not put console output in an app's log where anybody can read it. A suite that
+ * captured only one of the two would assert that a line was absent while the code was writing it to
+ * the other, which is a green that means nothing — so both are captured into one transcript, and
+ * there is no `globalThis.logger` outside Harper to restore, so one is installed and removed.
+ */
 const captureLog = async (fn) => {
   const lines = []
   const orig = console.log
-  console.log = (...a) => lines.push(a.join(' '))
-  try { await fn() } finally { console.log = orig }
+  const origLogger = globalThis.logger
+  const record = (...a) => lines.push(a.join(' '))
+  console.log = record
+  globalThis.logger = { ...(origLogger ?? {}), trace: record, debug: record, info: record, warn: record, error: record, fatal: record, notify: record }
+  try { await fn() } finally { console.log = orig; globalThis.logger = origLogger }
   return lines.join('\n')
 }
 
@@ -470,19 +483,27 @@ section('password (admin only)')
   check('an unknown email → the SAME 403 message (no enumeration)', nobody.status === 403 && nobody.json?.error === wrong.json?.error)
   check('neither carries WWW-Authenticate', !wrong.headers.get('www-authenticate') && !nobody.headers.get('www-authenticate'))
 
-  // THE POLICY, pinned. Admin-only password sign-in is deliberate and stated in
-  // five artefacts; what no suite asserted was the case that distinguishes "the role check is
-  // load-bearing" from "the role check is redundant". A member with a REAL hash and the RIGHT
-  // password must still be refused, or a future session reading only the code would conclude
-  // the check protects nothing and delete it. QA becomes a member by magic link instead, in
-  // the section below.
+  // THE POLICY, pinned — and it is THIS APP'S policy, which is not the kit's as shipped. The kit
+  // reserves password sign-in for an administrator; this shop's customers have accounts
+  // (resources/AuthApi.js's header), so the rule became "any ACTIVE row that HAS a hash". The
+  // assertion below was changed with the resource, in the same pass, rather than left asserting a
+  // rule the app no longer has — and the half that still discriminates is kept: a member with NO
+  // hash is still refused, which is what stops an invited or magic-link member being signed in by
+  // any string at all. `member@example.test` (no hash) carries that case through the sections
+  // below, including the PBKDF2 parity one.
   const { hashPassword } = await import('../lib/auth.js')
   const pwMember = newUser({ email: 'pw-member@example.test', role: 'member', passwordHash: hashPassword('a-long-enough-password') })
   await tables.User.put(pwMember)
   const asMember = await call(AuthApi, 'POST', 'password', { body: { email: 'pw-member@example.test', password: 'a-long-enough-password' } })
-  check('a MEMBER with a real hash and the RIGHT password is still refused (NEG — the admin-only policy)', asMember.status === 403 && asMember.json?.error === wrong.json?.error && asMember.cookies.length === 0)
-  check('…and the refusal is indistinguishable from a wrong password or an unknown address', asMember.json?.error === nobody.json?.error && !('code' in (asMember.json ?? {})))
+  check('a MEMBER with a real hash and the RIGHT password signs in (this app: customers have accounts)', asMember.status === 200 && asMember.cookies.length === 1 && asMember.json?.user?.role === 'member')
+  const memberWrong = await call(AuthApi, 'POST', 'password', { body: { email: 'pw-member@example.test', password: 'not-the-password' } })
+  check('…and the WRONG password for that same member is refused, with the generic body (NEG)', memberWrong.status === 403 && memberWrong.json?.error === nobody.json?.error && memberWrong.cookies.length === 0)
+  const hashless = newUser({ email: 'no-hash-member@example.test', role: 'member' })
+  await tables.User.put(hashless)
+  const asHashless = await call(AuthApi, 'POST', 'password', { body: { email: 'no-hash-member@example.test', password: 'a-long-enough-password' } })
+  check('a member with NO hash is refused whatever is sent (NEG — the hash is the credential)', asHashless.status === 403 && asHashless.json?.error === nobody.json?.error && asHashless.cookies.length === 0)
   await tables.User.delete(pwMember.id)
+  await tables.User.delete(hashless.id)
 }
 
 section(`password lockout: ${PASSWORD_ATTEMPT_LIMIT} misses per ${PASSWORD_ATTEMPT_WINDOW_MINUTES} min, on the row, reset by a success`)

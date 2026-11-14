@@ -1,12 +1,17 @@
 {
   "appName": "Pizza Shop Online Ordering",
   "summary": "I'll find and fix the bug that makes adding a new menu item fail with a 'Bad Request' error, so you can build out your menu again.",
-  "editClass": "logic",
+  "editClass": "data_model",
   "personas": [
     {
       "id": "owner",
       "label": "Shop owner",
-      "description": "Signs in with an emailed link and manages the menu, settings and incoming orders."
+      "description": "Signs in to manage the menu, settings and the order queue."
+    },
+    {
+      "id": "customer",
+      "label": "Customer",
+      "description": "Anyone browsing the menu and ordering, as a guest or with an account."
     }
   ],
   "stories": [
@@ -30,29 +35,103 @@
       ],
       "severity": "major",
       "area": "backend"
+    },
+    {
+      "id": "customer-create-account",
+      "actor": "customer",
+      "goal": "create an account with an email and password",
+      "acceptance": [
+        "A visitor can create an account with an email and password and is signed in afterward.",
+        "Signing in again later with that email and password returns them to their account."
+      ],
+      "severity": "major",
+      "area": "backend"
+    },
+    {
+      "id": "customer-order-linked-to-account",
+      "actor": "customer",
+      "goal": "place an order while signed in and have it saved to their account",
+      "acceptance": [
+        "When a signed-in customer completes checkout, the order shows up under their account afterward.",
+        "The order confirmation page works the same as it does for a guest order."
+      ],
+      "severity": "major",
+      "area": "backend"
+    },
+    {
+      "id": "customer-view-past-orders",
+      "actor": "customer",
+      "goal": "see their past orders",
+      "acceptance": [
+        "A signed-in customer can open a page listing their previous orders, each showing the date, items, total and status.",
+        "An order placed as a guest, before the account existed, does not appear in this list."
+      ],
+      "severity": "major",
+      "area": "frontend"
+    },
+    {
+      "id": "owner-upload-menu-photo",
+      "actor": "owner",
+      "goal": "upload a photo for a menu item in the menu editor",
+      "acceptance": [
+        "When adding or editing a menu item, the owner can choose an image file and save it with the item.",
+        "Saving a menu item without choosing a photo still works, leaving that item with no photo."
+      ],
+      "severity": "major",
+      "area": "backend"
+    },
+    {
+      "id": "public-menu-shows-photo",
+      "actor": "customer",
+      "goal": "see a menu item's photo on the public menu",
+      "acceptance": [
+        "On the home page menu, an item that has a photo shows it next to its name and price.",
+        "An item with no photo shows the menu exactly as it does today, with no broken image."
+      ],
+      "severity": "major",
+      "area": "frontend"
     }
   ],
   "entities": [
     {
       "name": "MenuItem",
       "description": "An existing menu item (name, description, price, category); this fix does not add or change its fields."
+    },
+    {
+      "name": "Customer account",
+      "description": "A customer's email, password and the orders placed while signed in."
+    },
+    {
+      "name": "Menu item photo",
+      "description": "One photo attached to a menu item, shown on the public menu."
     }
   ],
   "outOfScope": [
     "Fixing the separate report that order status buttons (Mark preparing, Mark ready, Cancel) also return a Bad Request error on /manage/orders — not part of this request",
     "Fixing the separate report that seeded demo orders show £0.00 per line in the order queue",
     "Fixing the separate report that new orders do not appear on /manage/orders without a page reload",
-    "Changing the 'Estimated ready' wording on the order confirmation page"
+    "Changing the 'Estimated ready' wording on the order confirmation page",
+    "Saved payment cards, loyalty points or any reward scheme for customer accounts.",
+    "Editing or cancelling an order from the customer's account after it is placed.",
+    "Linking a customer's earlier guest orders to a new account retroactively.",
+    "More than one photo per menu item, or cropping/editing tools for the photo.",
+    "Any change to who can sign in as the shop owner — still one invited address."
   ],
   "questions": [],
   "assumptions": [
     "Earlier testing found that every save on the menu editor (both adding and editing items) fails the same way — a 'Bad Request' error with nothing saved — while shop settings save correctly. This points to one shared fault in how the menu editor's saves are handled, so this fix covers adding new items (what you reported) and editing existing ones (the same fault, found during earlier testing), since fixing only one would leave the other broken.",
-    "Two other write actions — advancing or cancelling an order's status on /manage/orders — were separately found broken with the same kind of error. They are a different screen and are not part of what you asked me to fix here; I've left them out of scope so you can confirm whether you want those fixed next."
+    "Two other write actions — advancing or cancelling an order's status on /manage/orders — were separately found broken with the same kind of error. They are a different screen and are not part of what you asked me to fix here; I've left them out of scope so you can confirm whether you want those fixed next.",
+    "Opening sign-up to customers (anyone can create a customer account with an email and password) does not change who can manage the shop: only your own invited address can reach the owner screens.",
+    "At checkout, a signed-in customer's name, phone and (for delivery) address are filled in from their account but stay editable before the order is placed.",
+    "A guest order (nobody signed in) is not attached to any account, matching 'keep guest checkout'.",
+    "The order's name, phone and address are still cleared twelve months after it was placed, same as today, whether the order was placed as a guest or by a signed-in customer; this does not touch the customer's own account details.",
+    "A menu item photo is a single image (JPEG or PNG, up to 5MB); the owner can replace or remove it, and an item with none shows no image, as the menu does today.",
+    "The customer's past-orders page shows order code, date, items, total and status — the same details already shown on the order confirmation page."
   ],
   "riskFlags": [],
   "riskSubjects": [],
   "injectionNoted": [],
-  "sessionId": "9bf17b41-4e62-4865-916e-29a0085a6979",
-  "costUsd": 0.1803697,
+  "sessionId": "86253e51-5d8b-4552-b956-1fb0a4531ba1",
+  "costUsd": 0.25393679999999996,
   "overran": null
 }
