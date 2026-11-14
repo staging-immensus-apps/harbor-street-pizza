@@ -28,10 +28,12 @@
 // a second sign-in beside the reviewed one would be two session cookies and two places a mistake
 // lets the wrong person in — so two things changed here and nothing else did.
 //
-//   1. `register` below creates a MEMBER with a password, regardless of `AUTH_OPEN_SIGNUP`. That
-//      variable governs who may become a member of the APP by invitation (`accessModel.signUp:
-//      "invited"`, which is about the shop's staff, of whom there are none besides the owner);
-//      a customer account carries no access to anything but that customer's own orders.
+//   1. `register` below creates a MEMBER with a password, and only while `AUTH_OPEN_SIGNUP` is on —
+//      the same switch `request-link` and `google` read, which this app's plan sets to `open`
+//      (`accessModel.signUp`, CLAUDE.md §9). A customer account carries no access to anything but
+//      that customer's own orders, so opening sign-up opens nothing else; but "who may make an
+//      account here" is one question with one answer, and leaving this door ungated would mean the
+//      owner could close the other two and still get new accounts through this one.
 //   2. `password` below admits any active row that HAS a hash, not only an admin. A member gets a
 //      hash by registering, and by nothing else.
 //
@@ -308,6 +310,18 @@ export class AuthApi extends Resource {
    * as it comes back so the page can say the shop is not taking new accounts.
    */
   async register (data) {
+    // THE SAME FRONT-DOOR SWITCH THE OTHER TWO ACCOUNT-CREATING ROUTES READ (`request-link` above,
+    // `google` above), and first, before any input is read, so a closed shop answers one thing to
+    // every body and says nothing about which addresses exist. `AUTH_OPEN_SIGNUP` is written by the
+    // deploy from `accessModel.signUp` and by nothing else; it is `open` today, so this refuses
+    // nobody — the point is that closing sign-ups closes THIS door too. Without it the owner could
+    // not stop new customer accounts at all, and `GET /AuthApi/config`'s `openSignup` would be
+    // telling the page something no route enforced.
+    // There is no `ownerMayJoin` exemption here, unlike those two: the owner's address is refused
+    // outright a few lines below, and the header says what letting it through would cost.
+    if (!config.auth.openSignup()) {
+      return json({ error: 'This shop is not taking new accounts right now. You can still order as a guest.', code: 'signup_closed' }, 403)
+    }
     const email = normalizeEmail(data?.email)
     const password = String(data?.password ?? '')
     const name = String(data?.name ?? '').trim()

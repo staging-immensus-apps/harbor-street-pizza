@@ -7,7 +7,8 @@
 //
 //   1. `POST /AuthApi/register` makes a MEMBER with a password, and never an administrator — and it
 //      REFUSES the shop owner's address, so the row the owner's first magic link promotes can never
-//      already carry a password a stranger chose.
+//      already carry a password a stranger chose. It is open only while `AUTH_OPEN_SIGNUP` is, so
+//      closing the app's front door closes this one too.
 //   2. `POST /AuthApi/password` admits any ACTIVE row that HAS a hash. A row with no hash — every
 //      member made by invitation or by a link — is still refused whatever is sent.
 //   3. `DELETE /AccountApi/` unlinks the caller's orders and deletes the caller's row, and touches
@@ -26,10 +27,10 @@ process.env.IMMENSUS_TIER = 'builder'
 // The shop's owner, as the control plane delivers it. Set before anything reads it, because
 // `ownerSetting()` is what makes the refusal below a refusal.
 process.env.OWNER_EMAIL = 'owner@example.test'
-// Invite-only, as this app is deployed (`accessModel.signUp: "invited"`). Customer registration is
-// deliberately not governed by it, and asserting that here is the point: with this set to false a
-// customer must still be able to make an account.
-process.env.AUTH_OPEN_SIGNUP = 'false'
+// Open, as this app is deployed (`accessModel.signUp: "open"`, CLAUDE.md §9). Customer registration
+// IS governed by it, like the kit's other two account-creating routes, and the closed case is driven
+// below by turning this off for the length of one section.
+process.env.AUTH_OPEN_SIGNUP = 'true'
 
 const { checker } = await import('./probe/harness.js')
 const { tables, resetTables } = await import('./probe/harperdb-stub.js')
@@ -83,7 +84,7 @@ section('register: a visitor creates a customer account')
   const made = await call(AuthApi, 'POST', 'register', { body: { email: 'Casey@Example.test', password: PASSWORD, name: '  Casey  ' } })
   check('a valid registration → 201 with a session cookie', made.status === 201 && made.json?.ok === true && Boolean(await sessionCookie(made)))
   check('…the address is normalized and the name trimmed', made.json?.user?.email === CUSTOMER && made.json?.user?.name === 'Casey')
-  check('…the role is member, and AUTH_OPEN_SIGNUP=false did not stop a CUSTOMER account', made.json?.user?.role === 'member')
+  check('…the role is member, never an administrator', made.json?.user?.role === 'member')
   const row = tables.User.rows.get(userIdFor(CUSTOMER))
   check('…the row is keyed by the address and carries a hash, which is never handed back', Boolean(row?.passwordHash) && !('passwordHash' in (made.json?.user ?? {})))
 
@@ -93,6 +94,26 @@ section('register: a visitor creates a customer account')
   const again = await call(AuthApi, 'POST', 'register', { body: { email: CUSTOMER, password: 'a-different-password' } })
   check('registering the same address again → 409 already_registered, no cookie (NEG)', again.status === 409 && again.json?.code === 'already_registered' && again.cookies.length === 0)
   check('…and the stored hash is the FIRST one, not the second (NEG — a retry is not a password reset)', tables.User.rows.get(userIdFor(CUSTOMER)).passwordHash === row.passwordHash)
+}
+
+section("registration reads the app's front-door switch, like the kit's other two doors")
+{
+  // CLAUDE.md §9: `AUTH_OPEN_SIGNUP` is written by the deploy from `accessModel.signUp` and governs
+  // every route that can create an account. It is `open` for this app, so this section turns it off
+  // for the length of one call rather than for the suite — the closed shop is the case nobody
+  // exercises by hand, and an ungated `register` passed every other assertion in this file.
+  const LATE = 'late-arrival@example.test'
+  process.env.AUTH_OPEN_SIGNUP = 'false'
+  let shut
+  try {
+    shut = await call(AuthApi, 'POST', 'register', { body: { email: LATE, password: PASSWORD } })
+  } finally {
+    process.env.AUTH_OPEN_SIGNUP = 'true'
+  }
+  check('sign-up closed → 403 signup_closed, no row, no cookie (NEG)', shut.status === 403 && shut.json?.code === 'signup_closed' && !tables.User.rows.has(userIdFor(LATE)) && shut.cookies.length === 0)
+  // CONTROL: the identical request, so what refused above was the switch and not the address.
+  const open = await call(AuthApi, 'POST', 'register', { body: { email: LATE, password: PASSWORD } })
+  check('…and the identical request is accepted once it is open again (CONTROL)', open.status === 201 && tables.User.rows.get(userIdFor(LATE))?.role === 'member')
 }
 
 section("the owner's address is not a customer account (the seat cannot be pre-loaded)")
