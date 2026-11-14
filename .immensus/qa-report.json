@@ -1,21 +1,20 @@
 {
   "verdict": "FAILED",
-  "version": {
-    "sha": null,
-    "branch": null,
-    "stamp": null
-  },
   "stories": [
     {
       "id": "add-menu-item-works",
       "status": "not_testable",
       "severity": "blocker",
       "area": "frontend",
-      "message": "Could not sign in as the owner to reach /manage/menu: the admin password sign-in control at /login ('Admin? Sign in with a password' → email+password → Sign in) is non-functional. Reproduced with 8+ independent selector strategies (CSS adjacent-sibling, tag+text compound, ARIA accessible name) that all resolved to the same real <button> element; clicking it with correct or incorrect credentials produces zero network requests, zero console errors and no UI change. The same click mechanism worked correctly on every other button in the app (admin-toggle, Add to basket, Place order, Save password). Confirmed the backend itself is fine: POST /AuthApi/password with the owner's credentials returns 200 with the admin user object when hit directly (not through this broken control). Because browser_sign_in has no 'link' entry for the admin role, there is no way to obtain an authenticated owner browser session, so this story -- the main subject of this QA pass -- could not be exercised.",
+      "message": "Could not sign in as the owner to reach /manage/menu. The admin password sign-in control on /login (revealed via 'Admin? Sign in with a password') accepts input into the email and password fields, but clicking its submit control never issues any network request, reproduced across many distinct click-targeting strategies (the generic submit button, the toggle itself via its aria name 'Sign in', xpath-positional buttons 1-4, CSS sibling selectors after the password input, following::button[1]) each time with valid admin credentials filled in. The backend endpoint is sound: POST /AuthApi/password with the admin's real email+password returns 200 with the admin user object when called directly outside the browser. browser_sign_in has no admin/password-role support. Visiting /manage afterward always redirects back to /login, confirming no session was ever established through the UI.",
       "evidenceTier": 2,
       "evidence": [
-        "POST https://harbor-street-pizza.immensus-staging.app/preview/AuthApi/password with admin credentials -> 200 {ok:true,user:{role:'admin',email:'owner@example.com',...}}",
-        "8 reproduced click attempts on /login admin form (button[type=submit], form:last-of-type button, input[type=password]+button, aria/Sign in[role=button], button::-p-text(Sign in), etc.) all produced network count:0, console count:0, no DOM change"
+        "POST /preview/AuthApi/password {email:owner@example.com,password:<seeded>} -> 200 {ok:true,user:{id:...,email:owner@example.com,role:admin}} when called directly",
+        "Every UI click path tried (button[type=submit], aria/Sign in[role=button], xpath (//button)[1..4], input[type=password]+button, input[type=password]~button, input[type=password]/following::button[1]) with both fields filled produced zero network requests and zero console errors",
+        "GET /preview/manage after each attempt still renders the sign-in page, not the admin hub"
+      ],
+      "screenshots": [
+        "job_dd2f1baed0d4ff02-p18-3-light-375.png"
       ],
       "signedInAs": null
     },
@@ -24,81 +23,87 @@
       "status": "not_testable",
       "severity": "major",
       "area": "frontend",
-      "message": "Same blocker as add-menu-item-works: the owner cannot sign in through the UI because the admin password sign-in submit button does nothing when clicked (no network call, no error), so /manage/menu could not be reached as the owner and the previously-reported MenuAdminApi 400 fix could not be verified end-to-end through the browser.",
+      "message": "Same blocker as add-menu-item-works: the owner cannot be authenticated through the browser UI (the password sign-in control never fires a request despite valid credentials), so /manage/menu could not be reached to test editing an existing item.",
       "evidenceTier": 2,
       "evidence": [
-        "Same reproduction as add-menu-item-works"
+        "Identical reproduction as add-menu-item-works: POST /AuthApi/password succeeds when called directly (200, admin role) but no UI control ever calls it or anything else"
       ],
+      "screenshots": [],
       "signedInAs": null
     },
     {
       "id": "customer-create-account",
       "status": "fail",
       "severity": "major",
-      "area": "frontend",
-      "message": "A visitor cannot create an account with email+password directly: /login only offers a magic-link email field for customers (plus a broken admin-only password toggle). An account must first exist via magic-link sign-in; only afterward, from /my-orders, can the customer 'Set a new password' (verified: PUT /AccountApi/password -> 200 while signed in as customer2@example.com, and the resulting password does authenticate -- POST /AuthApi/password for customer2@example.com + the new password returned 200 with the correct member user). However the second half of the story ('signing in again later with that email and password returns them to their account') cannot be done through the UI at all, because the only password sign-in control in the app (the same one used for admin) is non-functional -- clicking it fires no request. So the story as written (create via email+password, sign in again with it) is not deliverable end-to-end through the product's UI, even though the underlying API supports password auth.",
+      "area": "backend",
+      "message": "Creating an account works and signs the visitor in immediately (POST /AuthApi/register -> 201, followed by a working /account and /my-orders). But signing in again later with that same email and password fails: after Sign out and returning to the Sign in tab with the identical credentials just used to register, POST /AuthApi/password returns 403 {\"error\":\"invalid email or password\"} and the page shows that message. Reproduced end-to-end twice with two independently created accounts (qa-customer-test1@example.com and qa-customer-test2@example.com), both failing identically immediately after sign-out. The same /AuthApi/password endpoint works correctly for the pre-seeded admin account when hit directly, so the endpoint logic itself runs; something about how a self-registered password is stored does not match what the login check verifies against.",
       "evidenceTier": 1,
       "evidence": [
-        "PUT https://harbor-street-pizza.immensus-staging.app/preview/AccountApi/password -> 200 'Saved.' while signed in as customer2@example.com",
-        "POST https://harbor-street-pizza.immensus-staging.app/preview/AuthApi/password {email:customer2@example.com,password:TestPass123!} -> 200 {role:member,...} (proves the backend password auth works)",
-        "Browser click on the only password sign-in button on /login produces 0 network requests -- a customer cannot actually use password sign-in in the browser"
+        "POST /preview/AuthApi/register 201 for qa-customer-test2@example.com; GET /AuthApi/me 200; /account and /my-orders render the new account correctly",
+        "After Sign out -> /login -> Sign in tab -> same email/password -> submit: POST /preview/AuthApi/password 403 body {\"error\":\"invalid email or password\"}",
+        "Reproduced identically with a second account, qa-customer-test1@example.com / TestPass123!"
       ],
-      "signedInAs": "member2"
+      "screenshots": [],
+      "signedInAs": null
     },
     {
       "id": "customer-order-linked-to-account",
       "status": "pass",
       "severity": "major",
       "area": null,
-      "message": "Signed in as member2 (customer2@example.com via magic link), added an item, checked out as pickup -> POST /CheckoutApi/order 201, GET /OrderConfirmationApi/<code> 200, confirmation page rendered status/payment/fulfilment/items/total identically to a guest order placed in a separate anonymous session. Reloading /my-orders while signed in as the same account showed the order (id b6gIBrjf5eyCX2rYi7XsNX3V77a7qtR5) with date, items and total.",
+      "message": "Signed in as a freshly self-registered customer, added Margherita to the basket and completed pickup checkout. POST /CheckoutApi/order returned 201 and the confirmation page rendered identically to the guest flow (order code, status Received, payment Pay at store, fulfilment Pickup, estimated ready time, items, total, name). Afterward GET /my-orders listed that same order under the signed-in account.",
       "evidenceTier": 1,
       "evidence": [
-        "POST /CheckoutApi/order -> 201",
-        "GET /OrderConfirmationApi/b6gIBrjf5eyCX2rYi7XsNX3V77a7qtR5 -> 200",
-        "GET /CustomerOrderApi -> 200 on /my-orders, listing order b6gIBrjf5eyCX2rYi7XsNX3V77a7qtR5"
+        "POST /preview/CheckoutApi/order 201 while signed in as qa-customer-test3@example.com",
+        "GET /preview/OrderConfirmationApi/Sk6WURUieFkHmqlywn78Kr93G4ucuyUn 200, confirmation page matched the guest-order layout",
+        "GET /preview/my-orders 200 afterward listed 'Order Sk6WURUieFkHmqlywn78Kr93G4ucuyUn ... 1 × Margherita £9.50 Total £9.50'"
       ],
-      "signedInAs": "member2"
+      "screenshots": [],
+      "signedInAs": null
     },
     {
       "id": "customer-view-past-orders",
       "status": "pass",
       "severity": "major",
       "area": null,
-      "message": "/my-orders, signed in as customer2@example.com, lists the account's own order (id b6gIBrjf5eyCX2rYi7XsNX3V77a7qtR5) with date (Nov 14, 2026), items (1 x QA test description), total (£7.75) and status (Received). A separate order placed as a guest in a different anonymous browser session (id xJk8rvDtwqfLfRA6pPfudDM-TGZdGKBF, no account) does NOT appear in this same account's /my-orders list after reload -- confirmed by comparing order ids, not names.",
+      "message": "Signed in as a self-registered customer (qa-customer-test3@example.com), /my-orders lists the account's own order with date (Nov 14, 2026), items (1 × Margherita, £9.50), total (£9.50) and status (Received). Separately placed a guest order with no session (a different item, order id mZ6PG3wVqKfxaEInX79snJuXMuK01nq_); reloading the signed-in customer's /my-orders afterward still showed only their own single order — the guest order does not appear. Also checked the seeded 'member' account (customer1@example.com, link sign-in): its /my-orders correctly shows no orders rather than member2's known order (id 42a35c74-41e5-45d6-b7ce-57b90a5edb6c, owner u_bc8ff7bc9cbcf078d9e537b9b6098f8d), consistent with correct per-account filtering.",
       "evidenceTier": 1,
       "evidence": [
-        "GET /CustomerOrderApi (while signed in as member2) -> 200, body lists only order b6gIBrjf5eyCX2rYi7XsNX3V77a7qtR5",
-        "Guest order xJk8rvDtwqfLfRA6pPfudDM-TGZdGKBF placed anonymously is absent from that same list on reload"
+        "GET /preview/my-orders 200 as qa-customer-test3@example.com showed exactly one dated order with items/total/status",
+        "Guest order (POST /CheckoutApi/order 201, id mZ6PG3wVqKfxaEInX79snJuXMuK01nq_) placed with no session did not appear on re-check of qa-customer-test3's /my-orders",
+        "member (customer1@example.com) /my-orders shows 'You don't have any orders on this account yet', never member2's row"
       ],
-      "signedInAs": "member2"
+      "screenshots": [],
+      "signedInAs": "member"
     },
     {
       "id": "owner-upload-menu-photo",
       "status": "not_testable",
       "severity": "major",
       "area": "frontend",
-      "message": "Could not sign in as the owner (same admin password sign-in button defect as add-menu-item-works), so the menu editor's photo-upload control could not be reached or exercised.",
+      "message": "Could not sign in as the owner to reach the menu editor and test photo upload: the admin password sign-in control on /login never submits (see add-menu-item-works). browser_sign_in has no admin/password role. MenuPhotoAdminApi correctly refuses anonymous access with 403, confirming the endpoint exists and is access-controlled, but its upload behaviour could not be exercised without an owner session.",
       "evidenceTier": 2,
       "evidence": [
-        "Same reproduction as add-menu-item-works"
+        "Admin password login never fires a request (see add-menu-item-works evidence)",
+        "GET /preview/MenuPhotoAdminApi anonymous -> 403 {\"error\":\"Authentication required\",\"code\":\"auth_required\"}"
       ],
+      "screenshots": [],
       "signedInAs": null
     },
     {
       "id": "public-menu-shows-photo",
-      "status": "fail",
+      "status": "not_testable",
       "severity": "major",
-      "area": "backend",
-      "message": "GET /MenuApi shows photoUrl set for two items (Margherita: /MenuPhotoApi/menu-margherita?v=..., Pepperoni: /MenuPhotoApi/menu-pepperoni?v=...), but both URLs 404 ({\"error\":\"not found\"}) whether fetched with or without the query string. On the home page, the browser's own requests for these two photo URLs also returned 404 and logged as console errors, so the items with a photo render a broken image instead of the photo, failing the first acceptance line. Items with no photo (photoUrl: null) render the menu normally with no broken image, satisfying the second acceptance line.",
+      "area": null,
+      "message": "The 'no photo renders the menu as today, with no broken image' half is verified: GET /MenuApi shows photoUrl: null for every current item, and the public home page renders all items normally (name, description, price, Add button) with no broken-image indicators. The 'item with a photo shows it' half could not be verified: no item in the current data has a photo, and creating one requires the owner's menu editor, which is unreachable because admin password sign-in does not work in the UI (see add-menu-item-works). Reported not_testable rather than a pass since only one half of the acceptance could be demonstrated.",
       "evidenceTier": 1,
       "evidence": [
-        "GET /MenuApi -> 200, items menu-margherita and menu-pepperoni carry non-null photoUrl",
-        "GET /MenuPhotoApi/menu-margherita(?v=...) -> 404 {error:'not found'}",
-        "Network capture on home page load: GET .../MenuPhotoApi/menu-margherita?v=... -> 404, GET .../MenuPhotoApi/menu-pepperoni?v=... -> 404; console shows 2 'Failed to load resource: 404' errors"
+        "GET /preview/MenuApi 200: every item across Pizzas/Sides/Drinks has \"photoUrl\":null",
+        "Home page (/) renders the full menu with names/descriptions/prices/Add buttons and no broken images, consistent with the no-photo case"
       ],
       "screenshots": [
-        "job_dd2f1baed0d4ff02-p9-3-light-375.png",
-        "job_dd2f1baed0d4ff02-p9-4-dark-1280.png"
+        "job_dd2f1baed0d4ff02-p18-1-light-375.png",
+        "job_dd2f1baed0d4ff02-p18-2-dark-1280.png"
       ],
       "signedInAs": null
     }
@@ -109,28 +114,20 @@
     "roleEscalation": "pass",
     "rollbackReady": "not_testable"
   },
-  "consoleErrors": [
-    "GET /Bootstrap/ -> 403 on every /login page load, logged as a console error (expected refusal since an admin already exists, but surfaces as a console error)",
-    "GET /MenuPhotoApi/menu-margherita?v=... -> 404 on home page load, logged as a console error",
-    "GET /MenuPhotoApi/menu-pepperoni?v=... -> 404 on home page load, logged as a console error"
-  ],
+  "consoleErrors": [],
   "defects": [
     {
       "area": "frontend",
       "severity": "blocker",
-      "message": "The admin password sign-in submit button on /login does nothing when clicked: no network request, no console error, no DOM change, reproduced across 8+ distinct, verified-correct element selectors. This blocks the owner from reaching any /manage screen through the UI at all, even though POST /AuthApi/password works correctly when called directly with the same credentials (200, correct admin user). This blocked verification of this pass's own stated fix (menu editor writes, order-status writes) through the browser."
-    },
-    {
-      "area": "frontend",
-      "severity": "minor",
-      "message": "GET /Bootstrap/ returns 403 on every /login page load and is logged as a console error, even though this is the expected/correct state once an admin account already exists."
+      "message": "The owner cannot sign in with a password through /login. The password fields fill fine, but no click target ever submits them: the one true submit button always posts to /AuthApi/request-link regardless of toggle state or password content; every other candidate fires no request and no console error. /AuthApi/password works when called directly. This blocks every owner-only screen, including the menu-editor and order-status fixes this release targeted."
     },
     {
       "area": "backend",
       "severity": "major",
-      "message": "MenuApi publishes photoUrl values (for Margherita and Pepperoni) that point at MenuPhotoApi paths which 404 -- the photo endpoint and the URL it is supposed to serve are out of sync, so every item that has a photo shows a broken image on the public menu."
+      "message": "A self-registered customer cannot sign in again with the password just used to create the account: POST /AuthApi/password returns 403 'invalid email or password' right after sign-out. Reproduced with two independent accounts. See customer-create-account story."
     }
   ],
+  "notes": "Admin (owner) stories could not be functionally tested because the password sign-in control on /login does not work from the browser; the backend auth endpoint is fine when hit directly, so this reads as a frontend wiring defect in the password-login submit control, separate from the 400-on-write bug this release targeted. Two customer-facing stories (order-linked-to-account, view-past-orders) passed via a self-registered account. Account creation works, but re-login afterward is broken. anonymousAccess and roleEscalation both passed across all five protected resources named in the plan.",
   "selection": {
     "how": "full",
     "why": "data/MenuItem.yaml, data/Order.yaml, lib/stripe-events.js, routes/spa.js and 4 more — nothing in the plan declares what depends on them",
@@ -188,9 +185,7 @@
       {
         "resource": "CustomerOrderApi",
         "by": "member2",
-        "row": "access-test-5b44b1323863",
-        "made": "direct",
-        "post": null
+        "row": "c3590711-9e9d-4886-805e-15f72c7a5482"
       }
     ],
     "untested": [],
