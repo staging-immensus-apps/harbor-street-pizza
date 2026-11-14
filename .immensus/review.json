@@ -1,21 +1,35 @@
 {
-  "verdict": "approve",
+  "verdict": "changes",
+  "designFidelity": "matches",
+  "summary": "Owner rules hold: CustomerOrderApi filters Order on customerUserId from loadCaller() with no admin branch and no id/query channel, CheckoutApi stamps customerUserId from optionalCaller() and never from the body, MenuPhotoAdminApi and MenuAdminApi open every method with requireAdmin(), and MenuPhotoApi/MenuApi are public exactly as api-plan.json says. Conventions are clean: loadAsInstance=false and checkPermission=false everywhere, class names differ from table names (MenuPhotoApi/MenuItemPhoto, CustomerOrderApi/Order), post(target, data), segmentsOf(), db.<Table> only, customerUserId @indexed, Blob written as new Blob([buf],{type}) with verify-on-write and delete-on-mismatch, withoutManaged() on every restated MenuItem/Order row, 403 with code everywhere and no 401, no new dependency and no new egress host. run_check lint is green. The one thing this build should fix before publish is a documented sign-up gate that the code does not apply. The QA report's two functional failures (a self-registered password not working on a later sign-in, and the /login password button) are the app owner's defects, not review findings, and are deliberately not listed here.",
   "findings": [
     {
-      "file": "deploy/smoke.txt",
-      "line": 4,
-      "rule": "convention",
+      "file": "resources/AuthApi.js",
+      "line": 310,
+      "rule": "auth_scope",
       "severity": "major",
-      "message": "This pass edited deploy/smoke.txt, which is outside the build's writable areas, and deleted two post-deploy smoke rows — `GET /MenuApi 200` and `GET /StoreInfoApi 200` — for the two public read endpoints this pass did not otherwise touch. Nothing in the diff changes MenuApi or StoreInfoApi, so there is no stated reason for the rows to go, and their removal is a quiet reduction of the only per-deploy proof that the customer-facing menu and shop-info endpoints answer at all (rule 12's smoke table). The trailing-slash normalisation on the three 403 rows is harmless; the two deletions should be restored unless there is a measured reason they cannot pass."
+      "message": "POST /AuthApi/register creates an account without ever consulting config.auth.openSignup(), while the two other account-creating paths in the same file do (request-link at line 171, google at line 248 which answers 403 not_invited). CLAUDE.md §9, written in this same diff, states the opposite — 'refuses unless config.auth.openSignup()' — so the app's own spec and its code disagree about the front door, and the code is the permissive one. api-plan.json currently says signUp: \"open\", so the deploy writes AUTH_OPEN_SIGNUP=true and nothing is open today that should be closed; the defect is that the gate is absent rather than true. The moment the owner asks to close sign-ups, request-link and google close and register stays wide open. Worse, scripts/customer-accounts-probe.js pins the ungated behaviour on purpose: it sets AUTH_OPEN_SIGNUP=false and asserts the registration still returns 201, so a later session restoring the gate has to break a green suite to do it. Either add the openSignup() check at the top of register() (and relax the probe), or change CLAUDE.md §9 so it describes what the code does — but one line should say one thing."
     },
     {
-      "file": "package.json",
-      "line": 74,
-      "rule": "convention",
+      "file": "resources/AuthApi.js",
+      "line": 322,
+      "rule": "auth_scope",
       "severity": "minor",
-      "message": "`managed-fields-probe` was registered in package.json by hand. The template's rule for a new probe is to write only `scripts/<name>-probe.js` and leave package.json alone, because the registration entry is written in code after this stage (CLAUDE.md §7.30, issue #136). The probe file itself is correct — `freezeClock()`, `process.exit(done())`, synthesized negative controls, and it reads `ROOT`/`checker` from a harness that does export both — so this is only the registration step done twice."
+      "message": "register() closes the pre-loaded-seat attack for exactly one address (OWNER_EMAIL) and the header explains that case well, but the same shape survives one step further out. Anyone may now register an address nobody has claimed and set a password on it; AdminApi.setRole (resources/AdminApi.js:107) can later promote any existing row to admin, and AuthApi.password now admits any active row carrying a hash. So an attacker who pre-registers an address the owner later promotes holds an admin password on that row. The exposure is narrow — CLAUDE.md says there are no staff logins, promotion is a deliberate admin act, and an invite alone does not change a role — but the mitigation is cheap and belongs with the owner-address check: either refuse password sign-in on a row whose hash predates its promotion, or clear passwordHash in setRole when a row is raised to admin."
+    },
+    {
+      "file": "resources/AuthApi.js",
+      "line": 335,
+      "rule": "race",
+      "severity": "minor",
+      "message": "register() uses `claim.created` as the uniqueness arbiter ('Two registrations of one address that interleave land on one key ... the loser is told the account exists'), but lib/auth.js's own measured header for claimUserForEmail says precisely the opposite: Harper's create() is a local getSync plus an unconditional commit retry, 'two concurrent claims on one address can both create', and 'a caller must not read created as proof it was first'. Under a true interleave both registrations therefore get 201 and a session, and the second hashPassword overwrites the first. The preceding findUserByEmail check makes a sequential retry safe, so the practical window is two simultaneous sign-ups of the same address and the blast radius is a member account; the comment claiming a guarantee the platform has measured as absent is the part worth correcting."
+    },
+    {
+      "file": "scripts/seed.js",
+      "line": null,
+      "rule": "secret",
+      "severity": "minor",
+      "message": "customerPassword() ships a literal default password ('pizza-preview-demo') that is hashed onto two seeded member accounts. It is not a provider key, the accounts are example.com, the value is overridable with SEED_CUSTOMER_PASSWORD and the header reasons about why the owner gets no seeded credential — so this is noted rather than blocked. Still: it is a working sign-in credential committed to the owner's repository, and now that AuthApi/password admits any row with a hash it is a real one wherever this script is ever run. Prefer requiring SEED_CUSTOMER_PASSWORD (or a per-run random value printed to stdout) over a default that is the same in every checkout."
     }
-  ],
-  "designFidelity": "matches",
-  "summary": "The build fixes the long-unexplained 400 by keeping Harper-assigned @createdTime/@updatedTime fields out of every record this app writes. Auth scope is untouched and correct: MenuAdminApi and OrderAdminApi still open every method — including `connect`/`subscribe` — with `requireAdmin()` before any db access, `static loadAsInstance = false` and `target.checkPermission = false` are in place, refusals remain the thrown 403 from runAuthed() with no 401 anywhere, and the public resources (MenuApi, StoreInfoApi, CheckoutApi, OrderConfirmationApi) are unchanged and match their plan rules. The writes still restate only server-derived fields, so a forged id, code, total, paymentStatus or customer field in a body changes nothing. No secrets, no new fetch host (lib/stripe-events.js and lib/retention.js only gained `withoutManaged`), no new dependency, no injection-shaped copy, no seed-data change, and schema.graphql gained comments only. Idempotency is preserved or improved: the webhook paths in lib/stripe-events.js now drop `updatedAt` off their spreads, which removes a refusal that would have answered Stripe 500 and left a paid order out of the queue. `lib/managed-fields.js` holds no state and the new managed-fields-probe parses every schema*.graphql so the hand-transcribed map cannot drift silently. Two process findings only: an out-of-area edit to deploy/smoke.txt that deletes two public-endpoint smoke rows, and a hand-written probe registration in package.json. Both are liveable and neither is an auth, secret or data hole."
+  ]
 }
