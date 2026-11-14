@@ -25,7 +25,10 @@ export class MenuPhotoApi extends Resource {
     const [id, sub] = segmentsOf(target)
     if (!id || sub) return json({ error: 'not found' }, 404)
     const row = await db.MenuItemPhoto.get(id)
-    if (!row) return json({ error: 'not found' }, 404)
+    if (!row) {
+      globalThis.logger?.warn(`[MenuPhotoApi] no stored photo for ${id}`)
+      return json({ error: 'not found' }, 404)
+    }
     if (!PHOTO_CONTENT_TYPES.includes(row.contentType)) {
       globalThis.logger?.warn(`[MenuPhotoApi] stored photo for ${id} has an unsupported content type and was refused`)
       return json({ error: 'not found' }, 404)

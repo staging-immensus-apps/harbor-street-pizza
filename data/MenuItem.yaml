@@ -12,10 +12,12 @@ records:
     category: Pizzas
     available: true
     sortOrder: 10
-    # The photo bytes are NOT here: a Blob seeded from YAML text would store the text. This stamp is
-    # what the public menu turns into a photo URL, and scripts/seed.js writes the matching
-    # MenuItemPhoto row (a generated PNG) under this same id.
-    photoUpdatedAt: '2026-11-14T09:00:00.000Z'
+    # NO photoUpdatedAt HERE, and that absence is the fix for two broken images on the public menu.
+    # The photo bytes cannot live in YAML (a Blob seeded from text stores the text), so
+    # scripts/seed.js writes the MenuItemPhoto row — and it now writes this stamp too, after the
+    # bytes have been stored and read back. When the stamp was here instead, the dataLoader asserted
+    # "this item has a photo" on every start whether or not any bytes existed, the public menu
+    # published /MenuPhotoApi/menu-margherita, and that URL answered 404.
   - id: menu-pepperoni
     name: Pepperoni
     description: Tomato, mozzarella, a generous layer of pepperoni.
@@ -23,7 +25,7 @@ records:
     category: Pizzas
     available: true
     sortOrder: 20
-    photoUpdatedAt: '2026-11-14T09:00:00.000Z'
+    # Stamped by scripts/seed.js with its photo, for the reason given on Margherita above.
   - id: menu-funghi
     name: Funghi
     description: Chestnut mushrooms, garlic, mozzarella, thyme.

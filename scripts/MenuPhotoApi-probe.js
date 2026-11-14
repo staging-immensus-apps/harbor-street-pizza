@@ -17,7 +17,7 @@ const { checker } = await import('./probe/harness.js')
 const { tables, resetTables } = await import('./probe/harperdb-stub.js')
 const { call, resource, transcript, responseRulesVerdict } = await import('./probe/resource-call.js')
 const { MenuPhotoApi } = await import('../resources/MenuPhotoApi.js')
-const { PHOTO_CONTENT_TYPES } = await import('../lib/photos.js')
+const { PHOTO_CONTENT_TYPES, photoRecord } = await import('../lib/photos.js')
 
 const { check, section, done, failures } = checker('MenuPhotoApi-probe')
 
@@ -46,6 +46,54 @@ section('a stored photo is served with its exact bytes, its stored content type 
   check('…the stored content type', res.headers.get('content-type') === 'image/png')
   check('…the right content-length', res.headers.get('content-length') === String(PNG_BYTES.length))
   check('…and a public, immutable, long-lived cache header (the one route that is deliberately cacheable)', res.headers.get('cache-control') === 'public, max-age=31536000, immutable')
+}
+
+section('a row stored the way photoRecord() writes it (a real Blob) is served correctly')
+{
+  const rec = photoRecord('m-blob', { buffer: PNG_BYTES, contentType: 'image/png' })
+  await tables.MenuItemPhoto.put(rec)
+  const res = await resource(MenuPhotoApi, {}).get({ pathname: 'm-blob' })
+  const body = Buffer.from(await res.arrayBuffer())
+  check('GET a photoRecord()-shaped row → 200', res.status === 200)
+  check('…with the exact stored bytes', body.equals(PNG_BYTES))
+  check('…the stored content type', res.headers.get('content-type') === 'image/png')
+  check('…the right content-length', res.headers.get('content-length') === String(PNG_BYTES.length))
+}
+
+section('every other shape photoBytes() now accepts also serves 200 — a store handing the column back differently is the other candidate cause QA named')
+{
+  await tables.MenuItemPhoto.put({ id: 'm-buf', contentType: 'image/png', byteSize: PNG_BYTES.length, data: PNG_BYTES, uploadedAt: '2026-01-01T00:00:00.000Z' })
+  const rBuf = await resource(MenuPhotoApi, {}).get({ pathname: 'm-buf' })
+  check('a raw Buffer in data → 200', rBuf.status === 200 && Buffer.from(await rBuf.arrayBuffer()).equals(PNG_BYTES))
+
+  const u8 = new Uint8Array(PNG_BYTES)
+  await tables.MenuItemPhoto.put({ id: 'm-u8', contentType: 'image/png', byteSize: PNG_BYTES.length, data: u8, uploadedAt: '2026-01-01T00:00:00.000Z' })
+  const rU8 = await resource(MenuPhotoApi, {}).get({ pathname: 'm-u8' })
+  check('a Uint8Array in data → 200', rU8.status === 200 && Buffer.from(await rU8.arrayBuffer()).equals(PNG_BYTES))
+
+  const streamed = { stream () { return (async function * () { yield PNG_BYTES })() } }
+  await tables.MenuItemPhoto.put({ id: 'm-stream', contentType: 'image/png', byteSize: PNG_BYTES.length, data: streamed, uploadedAt: '2026-01-01T00:00:00.000Z' })
+  const rStream = await resource(MenuPhotoApi, {}).get({ pathname: 'm-stream' })
+  check('an object exposing stream() in data → 200', rStream.status === 200 && Buffer.from(await rStream.arrayBuffer()).equals(PNG_BYTES))
+}
+
+section('a row whose data is a shape nothing can read, or is absent → still 404 (NEG: these are not simply "everything serves")')
+{
+  await tables.MenuItemPhoto.put({ id: 'm-unreadable', contentType: 'image/png', byteSize: PNG_BYTES.length, data: { nothingUsefulHere: true }, uploadedAt: '2026-01-01T00:00:00.000Z' })
+  const rUnreadable = await call(MenuPhotoApi, 'GET', 'm-unreadable')
+  check('an unreadable data shape → 404 (NEG)', rUnreadable.status === 404 && rUnreadable.json?.error === 'not found')
+
+  await tables.MenuItemPhoto.put({ id: 'm-nodata', contentType: 'image/png', byteSize: 0, uploadedAt: '2026-01-01T00:00:00.000Z' })
+  const rNoData = await call(MenuPhotoApi, 'GET', 'm-nodata')
+  check('no data column at all → 404 (NEG)', rNoData.status === 404 && rNoData.json?.error === 'not found')
+}
+
+section('?v= in the query changes nothing about the answer (QA checked both)')
+{
+  const withoutV = await call(MenuPhotoApi, 'GET', 'm1')
+  const withV = await call(MenuPhotoApi, 'GET', 'm1', { query: 'v=2026-01-01T00%3A00%3A00.000Z' })
+  check('with no ?v= → 200', withoutV.status === 200)
+  check('with ?v= → 200, same as without', withV.status === 200)
 }
 
 section('anonymous reads it with no cookie at all (this route carries no auth, by design)')

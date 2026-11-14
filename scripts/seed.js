@@ -142,6 +142,25 @@ export function solidPng (size, [r, g, b]) {
   ])
 }
 
+/**
+ * Point one `MenuItem` at the photo that is actually stored under its id — `photoUpdatedAt` set to
+ * the stored photo's own `uploadedAt`, or cleared when there is no photo. Returns whether it wrote.
+ *
+ * Idempotent by comparison, so a second run of this script writes nothing, and `withoutManaged`
+ * because this restates a stored row and `MenuItem.createdAt`/`updatedAt` are Harper's: a record
+ * naming either is refused with a bare 400 (CLAUDE.md §8).
+ *
+ * `db` and `withoutManaged` are passed in rather than imported at the top of this file, for the
+ * reason the import site gives: `--dry-run` must import nothing that reaches `harperdb`.
+ */
+async function stampItem (db, withoutManaged, menuItemId, photoUpdatedAt) {
+  const item = await db.MenuItem.get(menuItemId)
+  if (!item) return false
+  if ((item.photoUpdatedAt ?? null) === (photoUpdatedAt ?? null)) return false
+  await db.MenuItem.put({ ...withoutManaged(item, 'MenuItem'), photoUpdatedAt: photoUpdatedAt ?? null })
+  return true
+}
+
 async function main () {
   const dryRun = process.argv.includes('--dry-run')
 
@@ -150,7 +169,7 @@ async function main () {
 
   if (dryRun) {
     for (const a of SEED_ACCOUNTS) console.log(`  would ensure ${a.role} ${a.email}${a.password ? ' (with a password)' : ''}`)
-    for (const p of SEED_PHOTOS) console.log(`  would ensure a ${PHOTO_SIZE}x${PHOTO_SIZE} PNG for ${p.menuItemId}`)
+    for (const p of SEED_PHOTOS) console.log(`  would ensure a ${PHOTO_SIZE}x${PHOTO_SIZE} PNG for ${p.menuItemId}, and stamp that item's photoUpdatedAt only once the bytes read back`)
     for (const id of SEED_CUSTOMER_ORDERS.orderIds) console.log(`  would link order ${id} to ${SEED_CUSTOMER_ORDERS.email} if it carries no customer`)
     console.log('seed: --dry-run, nothing written')
     return 0
@@ -184,6 +203,13 @@ async function main () {
 
   // Photos. Written only for an item that is actually there: the dataLoader owns MenuItem, and a
   // photo under an id with no item would be bytes nothing can ever serve or delete.
+  //
+  // THE STAMP IS WRITTEN HERE AND NOWHERE ELSE, which is the fix for the broken images QA saw. It
+  // used to sit in data/MenuItem.yaml, so Harper's dataLoader asserted "this item has a photo" on
+  // every start while the BYTES came from this script — two writers of one fact, and when only the
+  // first of them ran the public menu published two photo URLs that both answered 404. Now
+  // `photoUpdatedAt` is set only after the bytes are stored AND read back, and is cleared whenever
+  // they are not, so the claim cannot outlive the data it is a claim about.
   for (const photo of SEED_PHOTOS) {
     const item = await db.MenuItem.get(photo.menuItemId)
     if (!item) {
@@ -193,7 +219,8 @@ async function main () {
     const buffer = solidPng(PHOTO_SIZE, photo.rgb)
     const stored = await db.MenuItemPhoto.get(photo.menuItemId)
     if (stored && await verifyStoredPhoto(stored, { byteSize: buffer.length })) {
-      console.log(`  kept    photo for ${photo.menuItemId}`)
+      const changed = await stampItem(db, withoutManaged, photo.menuItemId, stored.uploadedAt ?? null)
+      console.log(`  kept    photo for ${photo.menuItemId}${changed ? ' (stamped the item)' : ''}`)
       continue
     }
     const record = photoRecord(photo.menuItemId, { buffer, contentType: 'image/png' })
@@ -202,10 +229,12 @@ async function main () {
     // left behind a `photoUpdatedAt` that promises a customer an image.
     if (!await verifyStoredPhoto(await db.MenuItemPhoto.get(photo.menuItemId), record)) {
       await db.MenuItemPhoto.delete(photo.menuItemId)
-      console.log(`  FAILED  photo for ${photo.menuItemId} did not read back; the row was deleted`)
+      await stampItem(db, withoutManaged, photo.menuItemId, null)
+      console.log(`  FAILED  photo for ${photo.menuItemId} did not read back; the row was deleted and the item left with no photo`)
       continue
     }
-    console.log(`  wrote   photo for ${photo.menuItemId} (${record.byteSize} bytes)`)
+    await stampItem(db, withoutManaged, photo.menuItemId, record.uploadedAt)
+    console.log(`  wrote   photo for ${photo.menuItemId} (${record.byteSize} bytes) and stamped the item`)
   }
 
   // The two seeded orders that belong to the seeded customer's account.
